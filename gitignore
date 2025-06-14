@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+env/
+venv/
+ENV/
+.venv/
+
+# IDEs and tools
+.vscode/
+.idea/
+*.log
+
+# OS
+.DS_Store
+
+# dotenv and secrets
+.env
+
+# Jupyter notebooks
+*.ipynb_checkpoints
+
+# SQLite or other local DBs
+*.sqlite3
