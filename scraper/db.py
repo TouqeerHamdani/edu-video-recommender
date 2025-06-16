@@ -12,3 +12,11 @@ def get_connection():
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT")
     )
+'''if __name__ == "__main__":
+    try:
+        conn = get_connection()
+        print("✅ Connected to PostgreSQL successfully!")
+        conn.close()
+    except Exception as e:
+        print("❌ Failed to connect to PostgreSQL:")
+        print(e)'''

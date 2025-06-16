@@ -17,7 +17,9 @@ def fetch_videos(query, max_results=10):
     }
 
     response = requests.get(url, params=params)
-    return response.json().get('items', [])
+    items = response.json().get('items', [])
+    print(f"🔍 Search returned {len(items)} items.")
+    return items
 
 def get_video_details(video_ids):
     url = "https://www.googleapis.com/youtube/v3/videos"
@@ -51,18 +53,43 @@ def insert_video(conn, video):
             'Easy'         # Default difficulty
         ))
         conn.commit()
+        print(f"✅ Inserted: {video['snippet']['title']}")
 
 def main():
     conn = get_connection()
-    search_results = fetch_videos("Class 10 Science", max_results=10)
-    video_ids = [item['id']['videoId'] for item in search_results]
+
+    # DEBUG 1: Check if API key is loaded
+    print("🗝️ Using API Key:", API_KEY)
+    if not API_KEY:
+        print("❌ API Key is missing — check your .env file.")
+        return
+
+    # Try a broader query
+    search_query = "Science"  # Try "Class 10", "Math", etc.
+    search_results = fetch_videos(search_query, max_results=10)
+
+    # DEBUG 2: Print full API response
+    print("🔍 Full API Response:")
+    print(search_results)
+
+    video_ids = [item['id']['videoId'] for item in search_results if 'videoId' in item['id']]
+    print("🎯 Video IDs found:", video_ids)
+
+    if not video_ids:
+        print("❌ No video IDs found from search results.")
+        return
 
     detailed_videos = get_video_details(video_ids)
+
     for video in detailed_videos:
-        insert_video(conn, video)
+        try:
+            insert_video(conn, video)
+        except Exception as e:
+            print(f"❌ Error inserting video {video['id']}: {e}")
 
     conn.close()
-    print("Videos inserted into the database.")
+    print("🎉 Done inserting videos.")
+
 
 if __name__ == "__main__":
     main()
