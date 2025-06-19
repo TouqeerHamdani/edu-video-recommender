@@ -55,43 +55,18 @@
 
    
   <script>
-document.getElementById("searchBtn").addEventListener("click", async () => {
-    const query = document.getElementById("searchInput").value;
-    const user = "guest"; // or use a real user ID later
-    const resultsSection = document.getElementById("results");
+document.getElementById("searchBtn").addEventListener("click", () => {
+  const query = document.getElementById("searchInput").value.trim();
+  if (!query) {
+    alert("Please enter a search query.");
+    return;
+  }
 
-    if (!query.trim()) {
-        alert("Please enter a search query.");
-        return;
-    }
-
-    try {
-        const response = await fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`);
-        const data = await response.json();
-
-        // Clear previous results
-        resultsSection.innerHTML = "";
-
-        // Render video cards
-        data.results.forEach(video => {
-            const card = document.createElement("div");
-            card.className = "video-card";
-            card.innerHTML = `
-                <img src="${video.thumbnail}" alt="Thumbnail">
-                <div class="info">
-                    <h3>${video.title}</h3>
-                    <p>${video.channel}</p>
-                    <a href="${video.link}" target="_blank" style="color: #0af;">Watch</a>
-                </div>
-            `;
-            resultsSection.appendChild(card);
-        });
-    } catch (err) {
-        console.error("Error fetching recommendations:", err);
-        alert("Something went wrong while fetching recommendations.");
-    }
+  // Redirect to results.html with query
+  window.location.href = `results.html?query=${encodeURIComponent(query)}&user=guest`;
 });
 </script>
+
 </body>
 
 </html>
