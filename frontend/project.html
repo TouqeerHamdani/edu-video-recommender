@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="project.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <header>EduTV</header>
+
+    <div class="hero"> 
+        <h1>Unlock the Future of Learning</h1>
+        <p>Get personalized educational video recommendations instantly</p>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search for topics...">
+            <button id="searchBtn"><i class="fas fa-search"></i></button>
+        </div>
+    </div>
+
+    <section class="video-section">
+        <div class="video-card">
+            <img src="https://www.befunky.com/images/wp/wp-2019-11-BeFunky-YouTube-Thumbnail-Maker-15.jpg?auto=avif,webp&format=jpg&width=1136&crop=16:9" alt="Video Thumbnail">
+            <div class="info">
+                <h3>Introduction to AI</h3>
+                <p>Duration: 15 mins</p>
+            </div>
+        </div>
+
+        <div class="video-card">
+            <img src="https://cdn.pixabay.com/photo/2017/11/11/11/30/chemistry-2938901_640.jpg" alt="Video Thumbnail">
+            <div class="info">
+                <h3>Class 12 Chemistry: D Block</h3>
+                <p>Duration: 25 mins</p>
+            </div>
+        </div>
+
+        <div class="video-card">
+            <img src="https://s3.us-east-1.amazonaws.com/creator-assets.codedamn.com/harisiftikhar-662205559a7294000893c0e3/COURSE_IMAGE/2024-04-25/91fd68fca32cc462b365c1a71095e1792cef6e55" alt="Video Thumbnail">
+            <div class="info">
+                <h3>Python Programming Basics</h3>
+                <p>Duration: 30 mins</p>
+            </div>
+        </div>
+    </section>
+    <section id="results" class="results-section">
+        <h2>Search Results</h2>
+        <!-- Results will be dynamically inserted here -->
+    </section>
+    <footer>
+        &copy; 2025 EduTV. All rights reserved.
+    </footer>
+
+
+   
+  <script>
+document.getElementById("searchBtn").addEventListener("click", async () => {
+    const query = document.getElementById("searchInput").value;
+    const user = "guest"; // or use a real user ID later
+    const resultsSection = document.getElementById("results");
+
+    if (!query.trim()) {
+        alert("Please enter a search query.");
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`);
+        const data = await response.json();
+
+        // Clear previous results
+        resultsSection.innerHTML = "";
+
+        // Render video cards
+        data.results.forEach(video => {
+            const card = document.createElement("div");
+            card.className = "video-card";
+            card.innerHTML = `
+                <img src="${video.thumbnail}" alt="Thumbnail">
+                <div class="info">
+                    <h3>${video.title}</h3>
+                    <p>${video.channel}</p>
+                    <a href="${video.link}" target="_blank" style="color: #0af;">Watch</a>
+                </div>
+            `;
+            resultsSection.appendChild(card);
+        });
+    } catch (err) {
+        console.error("Error fetching recommendations:", err);
+        alert("Something went wrong while fetching recommendations.");
+    }
+});
+</script>
+</body>
+
+</html>
