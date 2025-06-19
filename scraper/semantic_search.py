@@ -31,28 +31,55 @@ def embed_text(text):
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-def recommend(query, top_n=5):
+def recommend(query, top_n=5, user_id="guest"):
     query_embedding = embed_text(query)
-    videos = fetch_videos()
+    user_profile = get_user_profile(user_id)
 
-    print(f"Fetched {len(videos)} videos from DB")  # <== ADD THIS LINE
+    videos = fetch_videos()
+    recommendations = []
 
     for video in videos:
         combined_text = f"{video['title']} {video['description']}"
-        video['embedding'] = embed_text(combined_text)
-        video['score'] = cosine_similarity(query_embedding, video['embedding'])
+        video_embedding = embed_text(combined_text)
 
-    sorted_videos = sorted(videos, key=lambda x: x['score'], reverse=True)
-    cleaned = []
-    for video in sorted_videos[:top_n]:
-        cleaned.append({
+        # Main similarity: query vs video
+        similarity = cosine_similarity(query_embedding, video_embedding)
+
+        # Personalization: user profile vs video
+        if user_profile is not None:
+            personalization = cosine_similarity(user_profile, video_embedding)
+            final_score = 0.7 * similarity + 0.3 * personalization
+        else:
+            final_score = similarity
+
+        recommendations.append({
             "title": video["title"],
             "channel": video["channel"],
-            "score": round(float(video["score"]), 4),
+            "score": round(float(final_score), 4),
             "link": f"https://www.youtube.com/watch?v={video['video_id']}",
             "thumbnail": video["thumbnail"]
         })
-    return cleaned
+
+    sorted_videos = sorted(recommendations, key=lambda x: x["score"], reverse=True)
+    return sorted_videos[:top_n]
+
+
+def get_user_profile(user_id):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT query FROM user_searches WHERE user_id = %s ORDER BY search_time DESC LIMIT 10",
+            (user_id,)
+        )
+        queries = [row[0] for row in cur.fetchall()]
+    conn.close()
+
+    if not queries:
+        return None
+
+    embeddings = [embed_text(q) for q in queries]
+    return np.mean(embeddings, axis=0)
+
 def log_search(query, user_id="guest"):
     conn = get_connection()
     with conn.cursor() as cur:
