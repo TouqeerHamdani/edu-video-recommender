@@ -124,6 +124,9 @@ footer {
     padding: 20px;
     text-align: center;
 }
+footer a{
+    color: lightskyblue;
+}
 
 @media(max-width: 500px) {
     .search-box input {
