@@ -44,29 +44,11 @@
             </div>
         </div>
     </section>
-    <section id="results" class="results-section">
-        <h2>Search Results</h2>
-        <!-- Results will be dynamically inserted here -->
-    </section>
     <footer>
         &copy; 2025 EduTV. All rights reserved.
     </footer>
 
 
-   
-  <script>
-document.getElementById("searchBtn").addEventListener("click", () => {
-  const query = document.getElementById("searchInput").value.trim();
-  if (!query) {
-    alert("Please enter a search query.");
-    return;
-  }
-
-  // Redirect to results.html with query
-  window.location.href = `results.html?query=${encodeURIComponent(query)}&user=guest`;
-});
-</script>
-
+<script src="project.js"> </script>
 </body>
-
 </html>
