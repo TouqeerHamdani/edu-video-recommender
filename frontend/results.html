@@ -4,58 +4,72 @@
   <meta charset="UTF-8" />
   <title>Search Results - EduTV</title>
   <link rel="stylesheet" href="project.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .topbar {
+      height: 53px;
+      display: flex;
+      align-items: center;
+      justify-content: left;
+      background-color: #111;
+      padding: 15px 30px;
+      color: white;
+    }
+    .topbar .logo {
+      font-size: 1.8rem;
+      font-weight: bold;
+    }
+    .topbar .search-box {
+      margin-left: 55px;
+      width: 480px;
+      display: flex;
+      border-radius: 7px;
+      overflow: hidden;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+    .topbar .search-box input {
+      flex: 1;
+      padding: 10px 15px;
+      font-size: 1rem;
+      border: none;
+      outline: none;
+    }
+    .topbar .search-box button {
+      background-color: #555;
+      color: white;
+      border: none;
+      padding: 0 15px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .topbar .search-box button:hover {
+      background-color: #333;
+    }
+  </style>
 </head>
 <body>
-  <header>
-    <h1>EduTV</h1>
-    <p>Search Results</p>
-  </header>
+  <div class="topbar">
+    <div class="logo">EduTV</div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search for topics...">
+      <button id="searchBtn"><i class="fas fa-search"></i></button>
+      <div class="empty"></div>
+    </div>
+  </div>
+
+  <div class="hero" style="height: 30px; padding: 30px 0; background: none;">
+    <h2 style="margin-top: 10px; text-align: center; color: #444;">Search Results</h2>
+  </div>
 
   <section id="results" class="video-section">
     <p style="text-align: center;">Loading recommendations...</p>
   </section>
 
   <footer>
-    <p><a href="project.html">Back to Search</a></p>
+    <p><a href="project.html">Back to Home</a></p>
   </footer>
 
-  <script>
-    function getQueryParam(param) {
-      const urlParams = new URLSearchParams(window.location.search);
-      return urlParams.get(param);
-    }
-
-    const query = getQueryParam("query");
-    const user = getQueryParam("user") || "guest";
-
-    const resultsSection = document.getElementById("results");
-
-    if (!query) {
-      resultsSection.innerHTML = "<p>No query provided.</p>";
-    } else {
-      fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
-        .then(res => res.json())
-        .then(data => {
-          resultsSection.innerHTML = "";
-          data.results.forEach(video => {
-            const card = document.createElement("div");
-            card.className = "video-card";
-            card.innerHTML = `
-              <img src="${video.thumbnail}" alt="Thumbnail">
-              <div class="info">
-                <h3>${video.title}</h3>
-                <p>${video.channel}</p>
-                <a href="${video.link}" target="_blank" style="color: #0af;">Watch</a>
-              </div>
-            `;
-            resultsSection.appendChild(card);
-          });
-        })
-        .catch(err => {
-          console.error("Fetch error:", err);
-          resultsSection.innerHTML = "<p>Could not load recommendations.</p>";
-        });
-    }
-  </script>
+  <script src="project.js"></script>
+  <script src="results.js"></script>
 </body>
 </html>
