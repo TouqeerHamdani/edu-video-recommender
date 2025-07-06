@@ -1,9 +1,9 @@
-import numpy as np
 from sentence_transformers import SentenceTransformer
+import numpy as np
 from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 
-# Load model once
+# Load model
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def embed_text(text):
@@ -12,7 +12,7 @@ def embed_text(text):
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-def recommend(query, top_n=10, user_id="guest"):
+def recommend(query, top_n=5, user_id="guest"):
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -26,9 +26,12 @@ def recommend(query, top_n=10, user_id="guest"):
     for row in rows:
         video_id, title, desc, thumb, channel = row
         full_text = f"{title} {desc}"
-        score = cosine_similarity(query_embedding, embed_text(full_text))
+        semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
 
-        if score > 0.4:
+        # You can apply popularity boost from DB if you store views/likes in DB
+        final_score = semantic_score  # for now, keep DB-only results pure
+
+        if semantic_score > 0.3:
             videos.append({
                 "video_id": video_id,
                 "title": title,
@@ -36,24 +39,34 @@ def recommend(query, top_n=10, user_id="guest"):
                 "thumbnail": thumb,
                 "channel": channel,
                 "link": f"https://www.youtube.com/watch?v={video_id}",
-                "score": float(score)
+                "score": float(final_score)
             })
 
-    # Fallback if no relevant results in DB
+    # Fallback: if nothing found in DB, fetch from YouTube
     if not videos:
-        print("⚠️ No relevant results in DB — trying YouTube fallback...")
+        print("⚠️ No relevant results found in DB — fetching from YouTube...")
         yt_results = yt_fetch_videos(query, max_results=10)
         video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
+        print(f"🎥 YouTube API returned {len(video_ids)} video IDs.")
 
         if video_ids:
             video_details = get_video_details(video_ids)
-            for video in video_details:
-                insert_video(conn, video, subject="Auto", difficulty="Medium")
 
             for video in video_details:
+                # ✅ Skip if not educational
+                if video["snippet"].get("categoryId") != "27":
+                    print(f"⛔ Skipped: {video['snippet']['title']} — not educational.")
+                    continue
+
                 title = video["snippet"]["title"]
                 desc = video["snippet"]["description"]
-                score = cosine_similarity(query_embedding, embed_text(f"{title} {desc}"))
+                full_text = f"{title} {desc}"
+                semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
+
+                views = int(video["statistics"].get("viewCount", 0))
+                likes = int(video["statistics"].get("likeCount", 0))
+                popularity_score = (views + 2 * likes) / 1_000_000  # Normalize popularity
+                final_score = 0.7 * semantic_score + 0.3 * popularity_score
 
                 videos.append({
                     "video_id": video["id"],
@@ -62,17 +75,16 @@ def recommend(query, top_n=10, user_id="guest"):
                     "thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
                     "channel": video["snippet"]["channelTitle"],
                     "link": f"https://www.youtube.com/watch?v={video['id']}",
-                    "score": float(score)
+                    "score": float(final_score)
                 })
 
-            print(f" Fallback results found and added: {len(videos)}")
-
+                insert_video(conn, video, subject="Auto", difficulty="Medium")
         else:
-            print(" No videos found via fallback.")
-
+            print("❌ YouTube API returned no usable results.")
 
     conn.close()
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
+
 
 def log_search(query, user_id="guest"):
     conn = get_connection()
