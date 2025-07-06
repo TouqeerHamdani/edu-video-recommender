@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from scraper.semantic_search import recommend
 from scraper.semantic_search import recommend, log_search
 
 app = Flask(__name__)
@@ -21,7 +20,7 @@ def get_recommendations():
 
     try:
         log_search(query, user_id=user)
-        results = recommend(query, top_n=5, user_id=user)
+        results = recommend(query, top_n=10, user_id=user)
         return jsonify({"results": results})
     except Exception as e:
         print("❌ Error in /api/recommend:", e)

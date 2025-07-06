@@ -15,8 +15,8 @@ def get_connection():
 '''if __name__ == "__main__":
     try:
         conn = get_connection()
-        print("✅ Connected to PostgreSQL successfully!")
+        print(" Connected to PostgreSQL successfully!")
         conn.close()
     except Exception as e:
-        print("❌ Failed to connect to PostgreSQL:")
+        print(" Failed to connect to PostgreSQL:")
         print(e)'''
