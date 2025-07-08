@@ -1,44 +1,32 @@
-import schedule
-import time
 from scraper.youtube_scraper import fetch_videos, get_video_details, insert_video
 from scraper.db import get_connection
-from scraper.semantic_search import embed_text
 
-POPULAR_QUERIES = [
-    "CBSE class 10 chemistry",
-    "CBSE class 12 physics",
-    "History of India",
-    "Photosynthesis",
-    "D and F block elements"
-]
+def run_scraper(query="class 10 science", max_results=50):
+    print(f"🔍 Running background scraper for: '{query}'")
 
-def run_scraper_job():
-    print("🚀 Running background scrape...")
+    yt_results = fetch_videos(query, max_results)
+    video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
 
+    if not video_ids:
+        print("⚠️ No video IDs returned from YouTube API.")
+        return
+
+    video_details = get_video_details(video_ids)
     conn = get_connection()
+    inserted = 0
 
-    for query in POPULAR_QUERIES:
-        print(f"🔍 Scraping: {query}")
-        try:
-            results = fetch_videos(query, max_results=10)
-            video_ids = [item['id']['videoId'] for item in results if 'videoId' in item['id']]
-            videos = get_video_details(video_ids)
+    for video in video_details:
+        #  Only store educational videos
+        if video["snippet"].get("categoryId") != "27":
+            print(f" Skipped non-educational video: {video['snippet']['title']}")
+            continue
 
-            for video in videos:
-                insert_video(conn, video, subject="Auto", difficulty="Medium")
-        except Exception as e:
-            print(f"❌ Error during scraping {query}: {e}")
+        insert_video(conn, video, subject="Auto", difficulty="Medium")
+        inserted += 1
 
     conn.close()
-    print("✅ Background scraping complete.\n")
+    print(f" Inserted {inserted} educational videos into the database.")
 
-# Run once immediately
-run_scraper_job()
-
-# Run job every hour (you can change this)
-schedule.every(1).hours.do(run_scraper_job)
-
-# Main loop
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+# Optional: Run manually
+if __name__ == "__main__":
+    run_scraper(query="cbse class 12 physics", max_results=25)
