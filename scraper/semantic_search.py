@@ -2,6 +2,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
+import isodate
 
 # Load model
 model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -11,6 +12,22 @@ def embed_text(text):
 
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def is_probable_short(video):
+    """
+    Returns True if video is likely a Short: duration < 60s or contains '#shorts' in title/description.
+    """
+    try:
+        iso_duration = video["contentDetails"]["duration"]
+        duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
+    except Exception as e:
+        print(f"⚠️ Failed to parse duration: {e}")
+        return True  # Assume short if unsure
+
+    title = video["snippet"]["title"].lower()
+    description = video["snippet"]["description"].lower()
+
+    return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
 def recommend(query, top_n=5, user_id="guest"):
     conn = get_connection()
@@ -28,9 +45,6 @@ def recommend(query, top_n=5, user_id="guest"):
         full_text = f"{title} {desc}"
         semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
 
-        # You can apply popularity boost from DB if you store views/likes in DB
-        final_score = semantic_score  # for now, keep DB-only results pure
-
         if semantic_score > 0.3:
             videos.append({
                 "video_id": video_id,
@@ -39,10 +53,9 @@ def recommend(query, top_n=5, user_id="guest"):
                 "thumbnail": thumb,
                 "channel": channel,
                 "link": f"https://www.youtube.com/watch?v={video_id}",
-                "score": float(final_score)
+                "score": float(semantic_score)
             })
 
-    # Fallback: if nothing found in DB, fetch from YouTube
     if not videos:
         print("⚠️ No relevant results found in DB — fetching from YouTube...")
         yt_results = yt_fetch_videos(query, max_results=10)
@@ -53,7 +66,10 @@ def recommend(query, top_n=5, user_id="guest"):
             video_details = get_video_details(video_ids)
 
             for video in video_details:
-                # ✅ Skip if not educational
+                if is_probable_short(video):
+                    print(f"⛔ Skipped: {video['snippet']['title']} — likely a Short.")
+                    continue
+
                 if video["snippet"].get("categoryId") != "27":
                     print(f"⛔ Skipped: {video['snippet']['title']} — not educational.")
                     continue
@@ -65,8 +81,11 @@ def recommend(query, top_n=5, user_id="guest"):
 
                 views = int(video["statistics"].get("viewCount", 0))
                 likes = int(video["statistics"].get("likeCount", 0))
-                popularity_score = (views + 2 * likes) / 1_000_000  # Normalize popularity
+                popularity_score = (views + 2 * likes) / 1_000_000
+
                 final_score = 0.7 * semantic_score + 0.3 * popularity_score
+
+                print(f"✅ Included: {title} — {views} views, score: {final_score:.4f}")
 
                 videos.append({
                     "video_id": video["id"],
@@ -84,7 +103,6 @@ def recommend(query, top_n=5, user_id="guest"):
 
     conn.close()
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
-
 
 def log_search(query, user_id="guest"):
     conn = get_connection()
@@ -137,7 +155,7 @@ def check_query_in_db(query):
     ]
 
 if __name__ == "__main__":
-    results = recommend("Thermodynamics", top_n=10, user_id="test_user")
+    results = recommend("upsc", top_n=10, user_id="test_user")
     for video in results:
         print(f"Title: {video['title']}")
         print(f"Channel: {video['channel']}")
