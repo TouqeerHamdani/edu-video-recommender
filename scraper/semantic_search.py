@@ -34,13 +34,14 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     conn = get_connection()
     cursor = conn.cursor()
 
-    print(f"🔍 Searching for: '{query}' (duration: {video_duration})")
+    print(f"Searching for: '{query}' (duration: {video_duration})")
 
     # Fetch duration from DB as well
     cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration FROM videos")
     rows = cursor.fetchall()
     query_embedding = embed_text(query)
     videos = []
+    seen_ids = set()
 
     def duration_in_range(duration_seconds, filter_type):
         if filter_type == "short":
@@ -73,12 +74,14 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                 "link": f"https://www.youtube.com/watch?v={video_id}",
                 "score": float(semantic_score)
             })
+            seen_ids.add(video_id)
 
-    if not videos:
-        print("⚠️ No relevant results found in DB — fetching from YouTube...")
-        yt_results = yt_fetch_videos(query, max_results=10, video_duration=video_duration)
+    # If we have fewer than top_n, fetch more from YouTube
+    if len(videos) < top_n:
+        print(f"Only {len(videos)} videos found in DB — fetching more from YouTube...")
+        yt_results = yt_fetch_videos(query, max_results=top_n*2, video_duration=video_duration)
         video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
-        print(f"🎥 YouTube API returned {len(video_ids)} video IDs.")
+        print(f"YouTube API returned {len(video_ids)} video IDs.")
 
         if video_ids:
             video_details = get_video_details(video_ids)
@@ -88,20 +91,25 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     iso_duration = video["contentDetails"]["duration"]
                     duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
                 except Exception as e:
-                    print(f"⚠️ Failed to parse duration: {e}")
+                    print(f"Failed to parse duration: {e}")
                     continue
 
                 # Strict duration filtering
                 if not duration_in_range(duration_seconds, video_duration):
-                    print(f"⛔ Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
+                    print(f"Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
                     continue
 
+                vid_id = video["id"]
+                if vid_id in seen_ids:
+                    print(f"Skipped: {video['snippet']['title']} — duplicate video ID.")
+                    continue  # skip duplicates
+
                 if is_probable_short(video):
-                    print(f"⛔ Skipped: {video['snippet']['title']} — likely a Short.")
+                    print(f"Skipped: {video['snippet']['title']} — likely a Short.")
                     continue
 
                 if video["snippet"].get("categoryId") != "27":
-                    print(f"⛔ Skipped: {video['snippet']['title']} — not educational.")
+                    print(f"Skipped: {video['snippet']['title']} — not educational.")
                     continue
 
                 title = video["snippet"]["title"]
@@ -115,21 +123,21 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
 
                 final_score = 0.7 * semantic_score + 0.3 * popularity_score
 
-                print(f"✅ Included: {title} — {views} views, score: {final_score:.4f}")
-
                 videos.append({
-                    "video_id": video["id"],
+                    "video_id": vid_id,
                     "title": title,
                     "description": desc,
                     "thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
                     "channel": video["snippet"]["channelTitle"],
-                    "link": f"https://www.youtube.com/watch?v={video['id']}",
+                    "link": f"https://www.youtube.com/watch?v={vid_id}",
                     "score": float(final_score)
                 })
+                seen_ids.add(vid_id)
 
                 insert_video(conn, video, subject="Auto", difficulty="Medium")
-        else:
-            print("❌ YouTube API returned no usable results.")
+
+                if len(videos) >= top_n:
+                    break
 
     conn.close()
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
