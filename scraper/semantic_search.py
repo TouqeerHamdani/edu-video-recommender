@@ -36,13 +36,30 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
 
     print(f"🔍 Searching for: '{query}' (duration: {video_duration})")
 
-    cursor.execute("SELECT video_id, title, description, thumbnail, channel FROM videos")
+    # Fetch duration from DB as well
+    cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration FROM videos")
     rows = cursor.fetchall()
     query_embedding = embed_text(query)
     videos = []
 
+    def duration_in_range(duration_seconds, filter_type):
+        if filter_type == "short":
+            return duration_seconds < 4 * 60
+        elif filter_type == "medium":
+            return 4 * 60 <= duration_seconds < 20 * 60
+        elif filter_type == "long":
+            return duration_seconds >= 20 * 60
+        else:
+            return True  # 'any'
+
     for row in rows:
-        video_id, title, desc, thumb, channel = row
+        video_id, title, desc, thumb, channel, duration_iso = row
+        try:
+            duration_seconds = isodate.parse_duration(duration_iso).total_seconds()
+        except Exception:
+            continue  # skip if can't parse
+        if not duration_in_range(duration_seconds, video_duration):
+            continue  # skip if not in range
         full_text = f"{title} {desc}"
         semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
 
@@ -56,16 +73,6 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                 "link": f"https://www.youtube.com/watch?v={video_id}",
                 "score": float(semantic_score)
             })
-
-    def duration_in_range(duration_seconds, filter_type):
-        if filter_type == "short":
-            return duration_seconds < 4 * 60
-        elif filter_type == "medium":
-            return 4 * 60 <= duration_seconds < 20 * 60
-        elif filter_type == "long":
-            return duration_seconds >= 20 * 60
-        else:
-            return True  # 'any'
 
     if not videos:
         print("⚠️ No relevant results found in DB — fetching from YouTube...")
