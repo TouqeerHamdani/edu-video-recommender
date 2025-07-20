@@ -29,11 +29,12 @@ def is_probable_short(video):
 
     return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
-def recommend(query, top_n=5, user_id="guest"):
+def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
+    import isodate
     conn = get_connection()
     cursor = conn.cursor()
 
-    print(f"🔍 Searching for: '{query}'")
+    print(f"🔍 Searching for: '{query}' (duration: {video_duration})")
 
     cursor.execute("SELECT video_id, title, description, thumbnail, channel FROM videos")
     rows = cursor.fetchall()
@@ -56,9 +57,19 @@ def recommend(query, top_n=5, user_id="guest"):
                 "score": float(semantic_score)
             })
 
+    def duration_in_range(duration_seconds, filter_type):
+        if filter_type == "short":
+            return duration_seconds < 4 * 60
+        elif filter_type == "medium":
+            return 4 * 60 <= duration_seconds < 20 * 60
+        elif filter_type == "long":
+            return duration_seconds >= 20 * 60
+        else:
+            return True  # 'any'
+
     if not videos:
         print("⚠️ No relevant results found in DB — fetching from YouTube...")
-        yt_results = yt_fetch_videos(query, max_results=10)
+        yt_results = yt_fetch_videos(query, max_results=10, video_duration=video_duration)
         video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
         print(f"🎥 YouTube API returned {len(video_ids)} video IDs.")
 
@@ -66,6 +77,18 @@ def recommend(query, top_n=5, user_id="guest"):
             video_details = get_video_details(video_ids)
 
             for video in video_details:
+                try:
+                    iso_duration = video["contentDetails"]["duration"]
+                    duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
+                except Exception as e:
+                    print(f"⚠️ Failed to parse duration: {e}")
+                    continue
+
+                # Strict duration filtering
+                if not duration_in_range(duration_seconds, video_duration):
+                    print(f"⛔ Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
+                    continue
+
                 if is_probable_short(video):
                     print(f"⛔ Skipped: {video['snippet']['title']} — likely a Short.")
                     continue
