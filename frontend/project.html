@@ -15,6 +15,12 @@
         <p>Get personalized educational video recommendations instantly</p>
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="Search for topics...">
+            <select id="durationSelect">
+                <option value="any">Any</option>
+                <option value="short">Short (&lt;4 min)</option>
+                <option value="medium" selected>Medium (4–20 min)</option>
+                <option value="long">Long (&gt;20 min)</option>
+            </select>
             <button id="searchBtn"><i class="fas fa-search"></i></button>
         </div>
     </div>

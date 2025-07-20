@@ -5,13 +5,14 @@ function getQueryParam(param) {
 
 const query = getQueryParam("query");
 const user = getQueryParam("user") || "guest";
+const duration = getQueryParam("duration") || "medium";
 
 const resultsSection = document.getElementById("results");
 
 if (!query) {
   resultsSection.innerHTML = "<p>No query provided.</p>";
 } else {
-  fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
+  fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}&duration=${duration}`)
     .then(res => res.json())
     .then(data => {
       resultsSection.innerHTML = "";

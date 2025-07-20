@@ -6,14 +6,16 @@ from scraper.db import get_connection
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-def fetch_videos(query, max_results=10):
+def fetch_videos(query, max_results=10, video_duration="medium", video_category_id="27"):
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         'part': 'snippet',
         'q': query,
         'type': 'video',
         'maxResults': max_results,
-        'key': API_KEY
+        'key': API_KEY,
+        'videoDuration': video_duration,  # 'any', 'short', 'medium', 'long'
+        'videoCategoryId': video_category_id  # '27' for Education
     }
 
     response = requests.get(url, params=params)
