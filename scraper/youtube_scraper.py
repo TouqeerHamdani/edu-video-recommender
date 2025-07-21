@@ -2,6 +2,7 @@ import os
 import requests
 from dotenv import load_dotenv
 from scraper.db import get_connection
+from scraper.semantic_utils import embed_text
 
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -35,24 +36,30 @@ def get_video_details(video_ids):
     return response.json().get('items', [])
 
 def insert_video(conn, video, subject="Science", difficulty="Easy"):
+    from scraper.semantic_utils import embed_text
+    title = video['snippet']['title']
+    description = video['snippet']['description']
+    full_text = f"{title} {description}"
+    embedding = embed_text(full_text).tolist()  # Convert numpy array to list for DB storage
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO videos (
                 video_id, title, description, channel, thumbnail,
-                views, likes, duration, subject, difficulty
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                views, likes, duration, subject, difficulty, embedding
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (video_id) DO NOTHING;
         """, (
             video['id'],
-            video['snippet']['title'],
-            video['snippet']['description'],
+            title,
+            description,
             video['snippet']['channelTitle'],
             video['snippet']['thumbnails']['high']['url'],
             int(video['statistics'].get('viewCount', 0)),
             int(video['statistics'].get('likeCount', 0)),
             video['contentDetails']['duration'],
             subject,
-            difficulty
+            difficulty,
+            embedding
         ))
         conn.commit()
 
