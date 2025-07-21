@@ -36,8 +36,8 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
 
     print(f"Searching for: '{query}' (duration: {video_duration})")
 
-    # Fetch duration from DB as well
-    cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration FROM videos")
+    # Fetch embedding from DB as well
+    cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration, embedding FROM videos")
     rows = cursor.fetchall()
     query_embedding = embed_text(query)
     videos = []
@@ -54,7 +54,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
             return True  # 'any'
 
     for row in rows:
-        video_id, title, desc, thumb, channel, duration_iso = row
+        video_id, title, desc, thumb, channel, duration_iso, embedding = row
         try:
             duration_seconds = isodate.parse_duration(duration_iso).total_seconds()
         except Exception:
@@ -62,7 +62,12 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         if not duration_in_range(duration_seconds, video_duration):
             continue  # skip if not in range
         full_text = f"{title} {desc}"
-        semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
+        # Use cached embedding if present, else compute
+        if embedding is not None:
+            video_embedding = np.array(embedding)
+        else:
+            video_embedding = embed_text(full_text)
+        semantic_score = cosine_similarity(query_embedding, video_embedding)
 
         if semantic_score > 0.3:
             videos.append({
