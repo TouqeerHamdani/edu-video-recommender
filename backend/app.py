@@ -1,9 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scraper.semantic_search import recommend, log_search
+from backend.auth import auth_bp  # Import the auth blueprint
 
 app = Flask(__name__)
 CORS(app)  # Allow frontend requests from any domain (you can restrict later)
+
+# Register the authentication blueprint
+app.register_blueprint(auth_bp)
 
 @app.route("/")
 def home():
