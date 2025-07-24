@@ -5,25 +5,24 @@ function getQueryParam(param) {
 
 const query = getQueryParam("query");
 const user = getQueryParam("user") || "guest";
-const duration = getQueryParam("duration") || "medium";
 
 const resultsSection = document.getElementById("results");
 
 if (!query) {
   resultsSection.innerHTML = "<p>No query provided.</p>";
 } else {
-  fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}&duration=${duration}`)
+  fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
     .then(res => res.json())
     .then(data => {
       resultsSection.innerHTML = "";
       data.results.forEach(video => {
         const videoId = video.link.split("v=")[1];
-        const card = document.createElement("div");
+        const card = document.createElement("a");
         card.className = "video-card";
+        card.href = `video.html?videoId=${videoId}&title=${encodeURIComponent(video.title)}&channel=${encodeURIComponent(video.channel)}`;
+        card.style.textDecoration = "none";
         card.innerHTML = `
-          <iframe width="100%" height="200" src="https://www.youtube.com/embed/${videoId}" 
-            frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-            allowfullscreen></iframe>
+          <img src="${video.thumbnail}" alt="Thumbnail">
           <div class="info">
             <h3>${video.title}</h3>
             <p>${video.channel}</p>
