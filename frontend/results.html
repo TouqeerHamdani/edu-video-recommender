@@ -5,59 +5,13 @@
   <title>Search Results - EduTV</title>
   <link rel="stylesheet" href="project.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    .topbar {
-      height: 53px;
-      display: flex;
-      align-items: center;
-      justify-content: left;
-      background-color: #111;
-      padding: 15px 30px;
-      color: white;
-    }
-    .topbar .logo {
-      font-size: 1.8rem;
-      font-weight: bold;
-    }
-    .topbar .search-box {
-      margin-left: 55px;
-      width: 480px;
-      display: flex;
-      border-radius: 7px;
-      overflow: hidden;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-    }
-    .topbar .search-box input {
-      flex: 1;
-      padding: 10px 15px;
-      font-size: 1rem;
-      border: none;
-      outline: none;
-    }
-    .topbar .search-box button {
-      background-color: #555;
-      color: white;
-      border: none;
-      padding: 0 15px;
-      font-size: 1rem;
-      cursor: pointer;
-    }
-    .topbar .search-box button:hover {
-      background-color: #333;
-    }
-  </style>
+  
 </head>
 <body>
   <div class="topbar">
     <div class="logo">EduTV</div>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Search for topics...">
-      <select id="durationSelect">
-        <option value="any">Any</option>
-        <option value="short">Short (&lt;4 min)</option>
-        <option value="medium" selected>Medium (4–20 min)</option>
-        <option value="long">Long (&gt;20 min)</option>
-      </select>
       <button id="searchBtn"><i class="fas fa-search"></i></button>
       <div class="empty"></div>
     </div>
