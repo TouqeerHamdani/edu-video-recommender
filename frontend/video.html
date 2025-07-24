@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Watch Video - EduTV</title>
+  <link rel="stylesheet" href="project.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+  <div class="logo">EduTV</div>
+  <div class="search-box">
+    <input type="text" id="searchInput" placeholder="Search for topics...">
+    <button id="searchBtn"><i class="fas fa-search"></i></button>
+  </div>
+</div>
+</header>
+
+  <section class="hero" style="height: auto; padding: 30px 40px; text-align: left;">
+    <div id="video-player" style="margin-bottom: 20px;"></div>
+    <h2 id="video-title"></h2>
+    <p id="video-channel" style="color: #ccc;"></p>
+  </section>
+
+  <footer>
+    <p><a href="index.html">Back to Home</a></p>
+  </footer>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const videoId = params.get("videoId");
+    const title = params.get("title");
+    const channel = params.get("channel");
+
+    if (videoId) {
+      document.getElementById("video-player").innerHTML = `
+        <iframe width="100%" height="400" src="https://www.youtube.com/embed/${videoId}" 
+          frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+          allowfullscreen></iframe>
+      `;
+    }
+
+    if (title) document.getElementById("video-title").textContent = decodeURIComponent(title);
+    if (channel) document.getElementById("video-channel").textContent = decodeURIComponent(channel);
+
+
+
+    document.getElementById("searchBtn").addEventListener("click", () => {
+  const query = document.getElementById("searchInput").value.trim();
+  if (!query) {
+    alert("Please enter a search query.");
+    return;
+  }
+  window.location.href = `results.html?query=${encodeURIComponent(query)}&user=guest`;
+});
+
+  </script>
+</body>
+</html>
