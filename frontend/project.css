@@ -133,3 +133,45 @@ footer a{
             width: 80%;
     }
 }
+
+
+
+.topbar {
+      height: 53px;
+      display: flex;
+      align-items: center;
+      justify-content: left;
+      background-color: #111;
+      padding: 15px 30px;
+      color: white;
+    }
+    .topbar .logo {
+      font-size: 1.8rem;
+      font-weight: bold;
+    }
+    .topbar .search-box {
+      margin-left: 55px;
+      width: 480px;
+      display: flex;
+      border-radius: 7px;
+      overflow: hidden;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+    .topbar .search-box input {
+      flex: 1;
+      padding: 10px 15px;
+      font-size: 1rem;
+      border: none;
+      outline: none;
+    }
+    .topbar .search-box button {
+      background-color: #555;
+      color: white;
+      border: none;
+      padding: 0 15px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .topbar .search-box button:hover {
+      background-color: #333;
+    }
