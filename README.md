@@ -1,50 +1,67 @@
-# AI-Powered Educational Video Recommender 🎓🔍
+# Edu Video Recommender
 
-This project is an intelligent educational video recommender system that fetches videos from YouTube and ranks them using semantic search. It helps students find relevant content based on subject, topic, and video duration.
+A full-stack application for recommending educational YouTube videos using semantic search, user authentication, and personalized features.
 
-## 📌 Features
-- 🔎 Search for educational content using natural language queries
-- 📹 YouTube API integration for real-time video data
-- 🤖 Semantic search using Sentence-BERT embeddings
-- 🧠 Smart ranking based on meaning, not just keywords
-- 🗂 Background video scraping and database caching
-- 🧾 Simple UI using HTML, CSS, and JavaScript
+## Features
+- User registration and login (JWT authentication)
+- Personalized video recommendations
+- Duration and topic filtering
+- Watch history and user search logging
+- Modern frontend with login/register page
+- Background scraping and semantic ranking
 
-## 🧱 Project Structure
-```
-edu-video-recommender/
-├── backend/         # Flask API
-├── scraper/         # YouTube data fetching and embedding
-├── frontend/        # HTML, CSS, JS frontend
-├── .env             # API keys (not committed)
-├── requirements.txt # Python dependencies
-└── README.md
+## Setup Instructions
+
+### 1. Clone the repository
+```sh
+git clone <your-repo-url>
+cd edu-video-recommender
 ```
 
-## 🧪 Getting Started
-
-1. Clone this repo:
-```bash
-git clone https://github.com/yourusername/edu-video-recommender.git
-```
-
-2. Install dependencies:
-```bash
+### 2. Install Python dependencies
+```sh
 pip install -r requirements.txt
 ```
 
-3. Add your `.env` file with your YouTube API key:
-```env
-YOUTUBE_API_KEY=your_key_here
+### 3. Set up the database
+- Create a PostgreSQL database and user.
+- Run the provided SQL to create tables (`users`, `videos`, `user_searches`, etc.).
+
+### 4. Environment Variables
+Create a `.env` file in the root directory with:
+```
+YOUTUBE_API_KEY=your_youtube_api_key
+DB_NAME=your_db_name
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_HOST=localhost
+DB_PORT=5432
+JWT_SECRET=your_jwt_secret
 ```
 
-4. Run the scraper:
-```bash
-python scraper/youtube_scraper.py
+### 5. Run the backend
+```sh
+python backend/app.py
 ```
 
-## 🔧 To Do
-- [ ] PostgreSQL integration
-- [ ] Embedding + semantic similarity
-- [ ] Flask API
-- [ ] Frontend UI
+### 6. Run the frontend
+- Open `frontend/project.html` or `frontend/auth.html` in your browser.
+
+## Authentication
+- Register or log in at `/frontend/auth.html`.
+- JWT token is stored in localStorage and used for protected endpoints.
+
+## API Endpoints
+- `POST /api/register` — Register a new user
+- `POST /api/login` — Log in and receive a JWT token
+- `GET /api/protected` — Example protected endpoint (requires JWT)
+- `GET /api/recommend` — Get video recommendations
+
+## Requirements
+See `requirements.txt` for all Python dependencies.
+
+## Contributing
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+
+## License
+[MIT](LICENSE)
