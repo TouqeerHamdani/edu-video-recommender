@@ -1,0 +1,12 @@
+Flask
+flask-cors
+flask-bcrypt
+requests
+python-dotenv
+psycopg2-binary
+sentence-transformers
+numpy
+isodate
+celery
+redis
+PyJWT 

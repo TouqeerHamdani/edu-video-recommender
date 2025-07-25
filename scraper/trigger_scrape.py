@@ -1,34 +1,23 @@
 import os
 import logging
 from scraper.tasks import scrape_and_store
+from scraper.dynamic_queries import get_top_user_queries
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load queries from environment variable or a config file
-# Example: EDU_QUERIES="class 10 science,cbse class 12 chemistry,ncert physics electricity"
-queries = os.getenv("EDU_QUERIES")
-if queries:
-    query_list = [q.strip() for q in queries.split(",") if q.strip()]
-else:
-    # Fallback to default queries if env variable not set
-    query_list = [
-        "class 10 science",
-        "cbse class 12 chemistry",
-        "ncert physics electricity"
-    ]
+# Get top user queries dynamically
+query_list = get_top_user_queries(limit=10, days=7)
 
 # Prevent duplicate scheduling using a simple set (could be replaced with Redis/db for distributed systems)
 scheduled_queries = set()
 
 for query in query_list:
     if query in scheduled_queries:
-        logger.warning(f"Duplicate query detected, skipping: {query}")
         continue
     try:
         scrape_and_store.delay(query)
-        logger.info(f"Scheduled scraping task for query: {query}")
         scheduled_queries.add(query)
     except Exception as e:
-        logger.error(f"Failed to schedule scraping for query: {query}, error: {e}")
+        print(f"Failed to schedule scraping for query: {query}, error: {e}")

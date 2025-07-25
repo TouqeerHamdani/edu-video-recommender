@@ -10,4 +10,4 @@ celery = Celery(
     backend=os.getenv("REDIS_BACKEND", "redis://localhost:6379/0")
 )
 
-celery.conf.timezone = 'Asia/Kolkata'  # Set to your timezone if needed
+celery.conf.timezone = 'Asia/Kolkata' 
