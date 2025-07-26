@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
         "./scraper"
-    ]
+    ],
+    "git.ignoreLimitWarning": true
 }
