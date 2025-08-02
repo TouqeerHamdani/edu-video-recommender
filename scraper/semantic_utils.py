@@ -1,8 +1,8 @@
 from sentence_transformers import SentenceTransformer
 import numpy as np
 
-# Use a much lighter model for Vercel compatibility
-model = SentenceTransformer("paraphrase-MiniLM-L3-v2")  # ~61MB vs ~100MB
+# Use the full model - Render can handle it
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 def embed_text(text):
     return model.encode([text])[0]

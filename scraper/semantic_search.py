@@ -4,8 +4,8 @@ from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 import isodate
 
-# Load a much lighter model - this is critical for Vercel
-model = SentenceTransformer('paraphrase-MiniLM-L3-v2')  # ~61MB vs ~100MB
+# Load model - Render can handle the full model
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def embed_text(text):
     return model.encode(text, convert_to_numpy=True)
