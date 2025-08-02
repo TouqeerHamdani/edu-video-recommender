@@ -9,4 +9,5 @@ numpy
 isodate
 celery
 redis
-PyJWT 
+PyJWT
+gunicorn 
