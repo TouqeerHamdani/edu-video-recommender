@@ -27,7 +27,7 @@ loginForm.addEventListener('submit', async (e) => {
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
     try {
-        const res = await fetch('http://localhost:5000/api/login', {
+        const res = await fetch('https://your-app.vercel.app/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -56,7 +56,7 @@ registerForm.addEventListener('submit', async (e) => {
     const email = document.getElementById('registerEmail').value.trim();
     const password = document.getElementById('registerPassword').value;
     try {
-        const res = await fetch('http://localhost:5000/api/register', {
+        const res = await fetch('https://your-app.vercel.app/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, email, password })

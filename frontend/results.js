@@ -11,7 +11,7 @@ const resultsSection = document.getElementById("results");
 if (!query) {
   resultsSection.innerHTML = "<p>No query provided.</p>";
 } else {
-  fetch(`http://localhost:5000/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
+  fetch(`https://your-app.vercel.app/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
     .then(res => res.json())
     .then(data => {
       resultsSection.innerHTML = "";
