@@ -35,3 +35,6 @@ def get_recommendations():
     except Exception as e:
         print("❌ Error in /api/recommend:", e)
         return jsonify({"error": str(e)}), 500
+
+# WSGI application for Vercel
+app.debug = True
