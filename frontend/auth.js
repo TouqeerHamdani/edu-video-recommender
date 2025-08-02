@@ -27,7 +27,7 @@ loginForm.addEventListener('submit', async (e) => {
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
     try {
-        const res = await fetch('@https://edu-video-recommender.vercel.app/api/login', {
+        const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -38,7 +38,7 @@ loginForm.addEventListener('submit', async (e) => {
             localStorage.setItem('username', data.username);
             authMessage.textContent = 'Login successful! Redirecting...';
             authMessage.classList.add('auth-success');
-            setTimeout(() => { window.location.href = 'project.html'; }, 1200);
+            setTimeout(() => { window.location.href = '/'; }, 1200);
         } else {
             authMessage.textContent = data.error || 'Login failed.';
             authMessage.classList.remove('auth-success');
@@ -56,7 +56,7 @@ registerForm.addEventListener('submit', async (e) => {
     const email = document.getElementById('registerEmail').value.trim();
     const password = document.getElementById('registerPassword').value;
     try {
-        const res = await fetch('@https://edu-video-recommender.vercel.app/api/register', {
+        const res = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, email, password })
