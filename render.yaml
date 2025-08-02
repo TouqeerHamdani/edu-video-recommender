@@ -3,7 +3,7 @@ services:
     name: edu-video-recommender
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn backend.app:app
+    startCommand: gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
       - key: YOUTUBE_API_KEY
         sync: false
@@ -18,4 +18,5 @@ services:
       - key: DB_PORT
         value: 5432
       - key: JWT_SECRET
-        sync: false 
+        sync: false
+    plan: starter 
