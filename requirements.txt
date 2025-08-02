@@ -1,12 +1,11 @@
-Flask==3.0.0
+Flask==2.3.3
 flask-cors==4.0.0
 flask-bcrypt==1.0.1
 requests==2.31.0
 python-dotenv==1.0.0
-psycopg2-binary==2.9.9
-numpy==1.26.4
+psycopg2-binary==2.9.7
+numpy==1.24.3
 isodate==0.6.1
 PyJWT==2.8.0
 sentence-transformers==2.2.2
-gunicorn==21.2.0
-setuptools==69.0.0 
+gunicorn==21.2.0 
