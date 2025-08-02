@@ -7,6 +7,6 @@ document.getElementById("searchBtn").addEventListener("click", () => {
     return;
   }
 
-  // Redirect to results.html with query, user, and duration
-  window.location.href = `results.html?query=${encodeURIComponent(query)}&user=guest&duration=${duration}`;
+  // Redirect to results page with query, user, and duration
+  window.location.href = `/results?query=${encodeURIComponent(query)}&user=guest&duration=${duration}`;
 });

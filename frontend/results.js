@@ -11,7 +11,7 @@ const resultsSection = document.getElementById("results");
 if (!query) {
   resultsSection.innerHTML = "<p>No query provided.</p>";
 } else {
-  fetch(`https://edu-video-recommender.vercel.app/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
+  fetch(`/api/recommend?query=${encodeURIComponent(query)}&user=${user}`)
     .then(res => res.json())
     .then(data => {
       resultsSection.innerHTML = "";
@@ -19,7 +19,7 @@ if (!query) {
         const videoId = video.link.split("v=")[1];
         const card = document.createElement("a");
         card.className = "video-card";
-        card.href = `video.html?videoId=${videoId}&title=${encodeURIComponent(video.title)}&channel=${encodeURIComponent(video.channel)}`;
+        card.href = `/video?videoId=${videoId}&title=${encodeURIComponent(video.title)}&channel=${encodeURIComponent(video.channel)}`;
         card.style.textDecoration = "none";
         card.innerHTML = `
           <img src="${video.thumbnail}" alt="Thumbnail">

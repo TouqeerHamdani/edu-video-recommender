@@ -24,7 +24,7 @@
   </section>
 
   <footer>
-    <p><a href="project.html">Back to Home</a></p>
+    <p><a href="/">Back to Home</a></p>
   </footer>
 
   <script>
@@ -52,7 +52,7 @@
     alert("Please enter a search query.");
     return;
   }
-  window.location.href = `results.html?query=${encodeURIComponent(query)}&user=guest`;
+  window.location.href = `/results?query=${encodeURIComponent(query)}&user=guest`;
 });
 
   </script>
