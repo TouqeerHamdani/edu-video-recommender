@@ -74,7 +74,7 @@ def main():
         return
 
     # Try a broader query
-    search_query = "thermodynamics class 11"  # Try "Class 10", "Math", etc.
+    search_query = "atom class 11 "  # Try "Class 10", "Math", etc.
     search_results = fetch_videos(search_query, max_results=100)
 
     # DEBUG 2: Print full API response
@@ -93,6 +93,7 @@ def main():
     for video in detailed_videos:
         try:
             insert_video(conn, video)
+            conn.cursor().execute("SELECT * FROM videos")
         except Exception as e:
             print(f" Error inserting video {video['id']}: {e}")
 

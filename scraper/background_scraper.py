@@ -29,4 +29,4 @@ def run_scraper(query="class 10 science", max_results=50):
 
 # Optional: Run manually
 if __name__ == "__main__":
-    run_scraper(query="cbse class 12 physics", max_results=25)
+    run_scraper(query="cbse class 12 physics", max_results=25) 
