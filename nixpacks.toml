@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["gcc", "python39"]
-
-[phases.install]
-cmds = ["pip install --no-cache-dir -r requirements.txt"]
-
-[start]
-cmd = "gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 120" 
