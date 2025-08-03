@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and cache
+logs/
+*.log
+model_cache/
+/tmp/model_cache/
+
+# Environment files
+.env
+.env.local
+
+# Documentation
+DEPLOYMENT_CHECKLIST.md
+README.md
+
+# Testing files
+test_*.py
+*_test.py
+
+# Jupyter
+*.ipynb
+*.ipynb_checkpoints
+
+# Database
+*.sqlite3
+*.db
+
+# Temporary files
+tmp/
+temp/ 
