@@ -28,4 +28,4 @@ def clean_shorts():
     print("Deleted all shorts.")
 
 if __name__ == "__main__":
-    clean_shorts()
+    clean_shorts() 

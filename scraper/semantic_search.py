@@ -3,11 +3,21 @@ import numpy as np
 from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 import isodate
+import gc
 
-# Load a much lighter model for Render compatibility
-model = SentenceTransformer('paraphrase-MiniLM-L3-v2')  # ~61MB vs ~100MB
+# Load model lazily to save memory
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        print("Loading ML model...")
+        _model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
+        print("ML model loaded successfully!")
+    return _model
 
 def embed_text(text):
+    model = get_model()
     return model.encode(text, convert_to_numpy=True)
 
 def cosine_similarity(a, b):
@@ -145,6 +155,8 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     break
 
     conn.close()
+    # Force garbage collection to free memory
+    gc.collect()
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
 
 def log_search(query, user_id="guest"):
@@ -198,7 +210,7 @@ def check_query_in_db(query):
     ]
 
 if __name__ == "__main__":
-    results = recommend("upsc", top_n=10, user_id="test_user")
+    results = recommend("atom class 11", top_n=10, user_id="test_user")
     for video in results:
         print(f"Title: {video['title']}")
         print(f"Channel: {video['channel']}")
