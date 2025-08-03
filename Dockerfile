@@ -13,8 +13,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies with optimization
-RUN pip install --no-cache-dir --no-deps -r requirements.txt \
-    && pip cache purge
+RUN pip install --no-cache-dir -r requirements.txt \    && pip cache purge
 
 # Copy only necessary application code
 COPY backend/ ./backend/
