@@ -2,8 +2,11 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
+from scraper.onnx_model import embed_text_onnx, embed_batch_onnx, get_memory_usage
 import isodate
 import gc
+import time
+from functools import lru_cache
 
 # Load model lazily to save memory
 _model = None
@@ -11,14 +14,32 @@ _model = None
 def get_model():
     global _model
     if _model is None:
-        print("Loading ML model...")
-        _model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
-        print("ML model loaded successfully!")
+        try:
+            # Use a much smaller model (61MB vs 100MB+)
+            _model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("Loaded all-MiniLM-L6-v2 model (smaller, faster)")
+        except Exception as e:
+            print(f"Failed to load ML model: {e}")
+            _model = None
     return _model
 
 def embed_text(text):
-    model = get_model()
-    return model.encode(text, convert_to_numpy=True)
+    """Embed text using ONNX model with Railway memory optimization"""
+    try:
+        return embed_text_onnx(text)
+    except Exception as e:
+        print(f"ONNX embedding failed, falling back to original: {e}")
+        model = get_model()
+        result = model.encode(text, convert_to_numpy=True)
+        # Clean up immediately for Railway
+        del model
+        gc.collect()
+        return result
+
+@lru_cache(maxsize=500)  # Reduced cache size for Railway
+def embed_text_cached(text):
+    """Cached version of embed_text for repeated queries"""
+    return embed_text(text)
 
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
@@ -45,11 +66,18 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     cursor = conn.cursor()
 
     print(f"Searching for: '{query}' (duration: {video_duration})")
+    start_time = time.time()
+    
+    # Monitor memory usage
+    initial_memory = get_memory_usage()
+    print(f"Initial memory usage: {initial_memory:.1f} MB")
 
     # Fetch embedding from DB as well
     cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration, embedding FROM videos")
     rows = cursor.fetchall()
-    query_embedding = embed_text(query)
+    
+    # Use cached embedding for query
+    query_embedding = embed_text_cached(query)
     videos = []
     seen_ids = set()
 
@@ -63,6 +91,10 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         else:
             return True  # 'any'
 
+    # Process videos in smaller batches for Railway memory constraints
+    texts_to_embed = []
+    video_data = []
+    
     for row in rows:
         video_id, title, desc, thumb, channel, duration_iso, embedding = row
         try:
@@ -71,25 +103,60 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
             continue  # skip if can't parse
         if not duration_in_range(duration_seconds, video_duration):
             continue  # skip if not in range
+            
         full_text = f"{title} {desc}"
-        # Use cached embedding if present, else compute
+        
+        # Use cached embedding if present, else prepare for batch embedding
         if embedding is not None:
             video_embedding = np.array(embedding)
+            semantic_score = cosine_similarity(query_embedding, video_embedding)
+            
+            if semantic_score > 0.3:
+                videos.append({
+                    "video_id": video_id,
+                    "title": title,
+                    "description": desc,
+                    "thumbnail": thumb,
+                    "channel": channel,
+                    "link": f"https://www.youtube.com/watch?v={video_id}",
+                    "score": float(semantic_score)
+                })
+                seen_ids.add(video_id)
         else:
-            video_embedding = embed_text(full_text)
-        semantic_score = cosine_similarity(query_embedding, video_embedding)
-
-        if semantic_score > 0.3:
-            videos.append({
+            # Prepare for batch embedding
+            texts_to_embed.append(full_text)
+            video_data.append({
                 "video_id": video_id,
                 "title": title,
                 "description": desc,
                 "thumbnail": thumb,
                 "channel": channel,
-                "link": f"https://www.youtube.com/watch?v={video_id}",
-                "score": float(semantic_score)
+                "duration_seconds": duration_seconds
             })
-            seen_ids.add(video_id)
+    
+    # Batch embed remaining videos with smaller batch size for Railway
+    if texts_to_embed:
+        try:
+            # Use smaller batch size for Railway memory constraints
+            batch_embeddings = embed_batch_onnx(texts_to_embed, batch_size=8)
+            
+            for i, video_info in enumerate(video_data):
+                video_embedding = batch_embeddings[i]
+                semantic_score = cosine_similarity(query_embedding, video_embedding)
+                
+                if semantic_score > 0.3:
+                    videos.append({
+                        "video_id": video_info["video_id"],
+                        "title": video_info["title"],
+                        "description": video_info["description"],
+                        "thumbnail": video_info["thumbnail"],
+                        "channel": video_info["channel"],
+                        "link": f"https://www.youtube.com/watch?v={video_info['video_id']}",
+                        "score": float(semantic_score)
+                    })
+                    seen_ids.add(video_info["video_id"])
+        except Exception as e:
+            print(f"Batch embedding failed: {e}")
 
     # If we have fewer than top_n, fetch more from YouTube
     if len(videos) < top_n:
@@ -155,8 +222,16 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     break
 
     conn.close()
-    # Force garbage collection to free memory
+    
+    # Force garbage collection to free memory for Railway
     gc.collect()
+    
+    elapsed_time = time.time() - start_time
+    final_memory = get_memory_usage()
+    print(f"Search completed in {elapsed_time:.2f} seconds")
+    print(f"Final memory usage: {final_memory:.1f} MB")
+    print(f"Memory delta: {final_memory - initial_memory:.1f} MB")
+    
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
 
 def log_search(query, user_id="guest"):

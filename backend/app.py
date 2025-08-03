@@ -110,6 +110,15 @@ def create_app(config_name=None):
         app.logger.error(f"Internal server error: {error}")
         return jsonify({"error": "Internal server error"}), 500
     
+    # Add startup health check
+    @app.before_first_request
+    def startup_health_check():
+        app.logger.info("Starting health check...")
+        if not check_db_connection():
+            app.logger.error("Database connection failed during startup")
+        else:
+            app.logger.info("Database connection successful")
+    
     return app
 
 # Create the app instance
