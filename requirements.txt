@@ -9,5 +9,10 @@ isodate==0.6.1
 PyJWT==2.8.0
 sentence-transformers==2.2.2
 gunicorn==21.2.0
+onnx==1.15.0
+onnxruntime==1.16.3
+torch==2.1.2
+transformers==4.36.2
+psutil==5.9.6
 setuptools==68.2.2
-huggingface-hub==0.16.4
+
