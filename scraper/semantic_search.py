@@ -1,14 +1,14 @@
-from sentence_transformers import SentenceTransformer
 import numpy as np
-from scraper.db import get_connection
-from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
-from scraper.onnx_model import embed_text_onnx, embed_batch_onnx, get_memory_usage
-import isodate
-import gc
 import time
 from functools import lru_cache
+import gc
+from sentence_transformers import SentenceTransformer
+from scraper.database import get_connection
+from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
+import isodate
+import psutil
 
-# Load model lazily to save memory
+# Global model instance for memory efficiency
 _model = None
 
 def get_model():
@@ -24,22 +24,41 @@ def get_model():
     return _model
 
 def embed_text(text):
-    """Embed text using ONNX model with Railway memory optimization"""
+    """Embed text using SentenceTransformer with Railway memory optimization"""
     try:
-        return embed_text_onnx(text)
-    except Exception as e:
-        print(f"ONNX embedding failed, falling back to original: {e}")
         model = get_model()
+        if model is None:
+            raise Exception("Model not loaded")
         result = model.encode(text, convert_to_numpy=True)
-        # Clean up immediately for Railway
-        del model
-        gc.collect()
+        # Don't delete model - keep it in memory for next request
         return result
+    except Exception as e:
+        print(f"Embedding failed: {e}")
+        return None
+
+def embed_batch(texts, batch_size=8):
+    """Embed batch of texts using SentenceTransformer"""
+    try:
+        model = get_model()
+        if model is None:
+            raise Exception("Model not loaded")
+        # Use smaller batch size for Railway memory constraints
+        results = model.encode(texts, batch_size=batch_size, convert_to_numpy=True)
+        # Don't delete model - keep it in memory for next request
+        return results
+    except Exception as e:
+        print(f"Batch embedding failed: {e}")
+        return None
 
 @lru_cache(maxsize=500)  # Reduced cache size for Railway
 def embed_text_cached(text):
     """Cached version of embed_text for repeated queries"""
     return embed_text(text)
+
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process()
+    return process.memory_info().rss / 1024 / 1024
 
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
@@ -61,8 +80,6 @@ def is_probable_short(video):
     return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
 def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
-    import isodate
-    import psutil
     process = psutil.Process()
     print(f"[MEMORY] Recommend start: {process.memory_info().rss / 1024 / 1024:.2f} MB")
     conn = get_connection()
@@ -141,7 +158,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     if texts_to_embed:
         try:
             # Use smaller batch size for Railway memory constraints
-            batch_embeddings = embed_batch_onnx(texts_to_embed, batch_size=8)
+            batch_embeddings = embed_batch(texts_to_embed, batch_size=8)
             
             for i, video_info in enumerate(video_data):
                 video_embedding = batch_embeddings[i]
