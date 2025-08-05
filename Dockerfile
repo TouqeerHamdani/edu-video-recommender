@@ -1,13 +1,13 @@
-# Multi-stage build to reduce final image size
-FROM python:3.9-slim AS builder
+FROM python:3.9-slim
 
-# Install build dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libffi-dev \
     libssl-dev \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -17,60 +17,28 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies in virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Final stage - minimal runtime image
-FROM python:3.9-slim
-
-# Install only runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libffi6 \
-    libssl1.1 \
-    libpq5 \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Set working directory
-WORKDIR /app
-
-# Copy only necessary application code
+# Copy application code
 COPY backend/ ./backend/
 COPY scraper/ ./scraper/
 COPY frontend/ ./frontend/
 COPY config.py .
 
-# Create minimal directories and set permissions
-RUN mkdir -p logs /tmp/model_cache && chown -R appuser:appuser /app
+# Create directories
+RUN mkdir -p logs /tmp/model_cache
 
-# Set environment variables for Railway
-ENV RAILWAY_ENVIRONMENT=production
-ENV RAILWAY_MEMORY_LIMIT=4GB
+# Set environment variables
 ENV PYTHONPATH=/app
-
-# Switch to non-root user
-USER appuser
+ENV PORT=10000
 
 # Expose port
 EXPOSE $PORT
 
-# Start the application with Railway-optimized settings
+# Start the application
 CMD gunicorn backend.wsgi:application \
     --bind 0.0.0.0:$PORT \
     --workers 1 \
     --timeout 120 \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --preload \
-    --graceful-timeout 30 \
-    --keep-alive 2
+    --preload
