@@ -1,14 +1,15 @@
 # Multi-stage build to reduce final image size
-FROM python:3.9-alpine AS builder
+FROM python:3.9-slim AS builder
 
 # Install build dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     gcc \
-    musl-dev \
+    g++ \
     libffi-dev \
-    openssl-dev \
-    postgresql-dev \
-    python3-dev
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set working directory
 WORKDIR /app
@@ -22,18 +23,19 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Final stage - minimal runtime image
-FROM python:3.9-alpine
+FROM python:3.9-slim
 
 # Install only runtime dependencies
-RUN apk add --no-cache \
-    libffi \
-    openssl \
-    postgresql-libs \
-    curl
+RUN apt-get update && apt-get install -y \
+    libffi6 \
+    libssl1.1 \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Create non-root user
-RUN addgroup -g 1001 -S appuser && \
-    adduser -S -D -H -u 1001 -h /app -s /sbin/nologin -G appuser -g appuser appuser
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
