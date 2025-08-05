@@ -3,7 +3,7 @@ import time
 from functools import lru_cache
 import gc
 from sentence_transformers import SentenceTransformer
-from scraper.database import get_connection
+from scraper.db import get_connection
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 import isodate
 import psutil
@@ -44,7 +44,6 @@ def embed_batch(texts, batch_size=8):
             raise Exception("Model not loaded")
         # Use smaller batch size for Railway memory constraints
         results = model.encode(texts, batch_size=batch_size, convert_to_numpy=True)
-        # Don't delete model - keep it in memory for next request
         return results
     except Exception as e:
         print(f"Batch embedding failed: {e}")
