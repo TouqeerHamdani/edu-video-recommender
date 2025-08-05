@@ -2,7 +2,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 
 # Use a lighter model for Render compatibility
-model = SentenceTransformer("paraphrase-MiniLM-L3-v2")  # ~61MB vs ~100MB
+model = SentenceTransformer("nreimers/tiny-sbert-nli")  # swapped for minimal memory
 
 def embed_text(text):
     return model.encode([text])[0]

@@ -15,9 +15,9 @@ def get_model():
     global _model
     if _model is None:
         try:
-            # Use a much smaller model (61MB vs 100MB+)
-            _model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("Loaded all-MiniLM-L6-v2 model (smaller, faster)")
+            # Use the smallest model for memory
+            _model = SentenceTransformer('nreimers/tiny-sbert-nli')
+            print("Loaded nreimers/tiny-sbert-nli model (minimal memory)")
         except Exception as e:
             print(f"Failed to load ML model: {e}")
             _model = None
@@ -62,6 +62,9 @@ def is_probable_short(video):
 
 def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     import isodate
+    import psutil
+    process = psutil.Process()
+    print(f"[MEMORY] Recommend start: {process.memory_info().rss / 1024 / 1024:.2f} MB")
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -231,6 +234,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     print(f"Search completed in {elapsed_time:.2f} seconds")
     print(f"Final memory usage: {final_memory:.1f} MB")
     print(f"Memory delta: {final_memory - initial_memory:.1f} MB")
+    print(f"[MEMORY] Recommend end: {process.memory_info().rss / 1024 / 1024:.2f} MB")
     
     return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
 
