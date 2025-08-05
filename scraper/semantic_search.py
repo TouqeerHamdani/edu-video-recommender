@@ -79,180 +79,198 @@ def is_probable_short(video):
     return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
 def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
+    import isodate
+    import psutil
+    import gc
+    
     process = psutil.Process()
-    print(f"[MEMORY] Recommend start: {process.memory_info().rss / 1024 / 1024:.2f} MB")
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    print(f"Searching for: '{query}' (duration: {video_duration})")
-    start_time = time.time()
+    initial_memory = process.memory_info().rss / 1024 / 1024
+    print(f"[MEMORY] Recommend start: {initial_memory:.2f} MB")
     
-    # Monitor memory usage
-    initial_memory = get_memory_usage()
-    print(f"Initial memory usage: {initial_memory:.1f} MB")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
 
-    # Fetch embedding from DB as well
-    cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration, embedding FROM videos")
-    rows = cursor.fetchall()
-    
-    # Use cached embedding for query
-    query_embedding = embed_text_cached(query)
-    videos = []
-    seen_ids = set()
-
-    def duration_in_range(duration_seconds, filter_type):
-        if filter_type == "short":
-            return duration_seconds < 4 * 60
-        elif filter_type == "medium":
-            return 4 * 60 <= duration_seconds < 20 * 60
-        elif filter_type == "long":
-            return duration_seconds >= 20 * 60
-        else:
-            return True  # 'any'
-
-    # Process videos in smaller batches for Railway memory constraints
-    texts_to_embed = []
-    video_data = []
-    
-    for row in rows:
-        video_id, title, desc, thumb, channel, duration_iso, embedding = row
-        try:
-            duration_seconds = isodate.parse_duration(duration_iso).total_seconds()
-        except Exception:
-            continue  # skip if can't parse
-        if not duration_in_range(duration_seconds, video_duration):
-            continue  # skip if not in range
-            
-        full_text = f"{title} {desc}"
+        print(f"Searching for: '{query}' (duration: {video_duration})")
+        start_time = time.time()
         
-        # Use cached embedding if present, else prepare for batch embedding
-        if embedding is not None:
-            video_embedding = np.array(embedding)
-            semantic_score = cosine_similarity(query_embedding, video_embedding)
+        # Monitor memory usage
+        print(f"Initial memory usage: {initial_memory:.1f} MB")
+
+        # Fetch embedding from DB as well
+        cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration, embedding FROM videos")
+        rows = cursor.fetchall()
+        
+        # Use cached embedding for query
+        query_embedding = embed_text_cached(query)
+        if query_embedding is None:
+            print("[ERROR] Failed to embed query")
+            return []
             
-            if semantic_score > 0.3:
-                videos.append({
+        videos = []
+        seen_ids = set()
+
+        def duration_in_range(duration_seconds, filter_type):
+            if filter_type == "short":
+                return duration_seconds < 4 * 60
+            elif filter_type == "medium":
+                return 4 * 60 <= duration_seconds < 20 * 60
+            elif filter_type == "long":
+                return duration_seconds >= 20 * 60
+            else:
+                return True  # 'any'
+
+        # Process videos in smaller batches for memory constraints
+        texts_to_embed = []
+        video_data = []
+        
+        for row in rows:
+            video_id, title, desc, thumb, channel, duration_iso, embedding = row
+            try:
+                duration_seconds = isodate.parse_duration(duration_iso).total_seconds()
+            except Exception:
+                continue  # skip if can't parse
+            if not duration_in_range(duration_seconds, video_duration):
+                continue  # skip if not in range
+                
+            full_text = f"{title} {desc}"
+            
+            # Use cached embedding if present, else prepare for batch embedding
+            if embedding is not None:
+                video_embedding = np.array(embedding)
+                semantic_score = cosine_similarity(query_embedding, video_embedding)
+                
+                if semantic_score > 0.3:
+                    videos.append({
+                        "video_id": video_id,
+                        "title": title,
+                        "description": desc,
+                        "thumbnail": thumb,
+                        "channel": channel,
+                        "link": f"https://www.youtube.com/watch?v={video_id}",
+                        "score": float(semantic_score)
+                    })
+                    seen_ids.add(video_id)
+            else:
+                # Prepare for batch embedding
+                texts_to_embed.append(full_text)
+                video_data.append({
                     "video_id": video_id,
                     "title": title,
                     "description": desc,
                     "thumbnail": thumb,
                     "channel": channel,
-                    "link": f"https://www.youtube.com/watch?v={video_id}",
-                    "score": float(semantic_score)
+                    "duration_seconds": duration_seconds
                 })
-                seen_ids.add(video_id)
-        else:
-            # Prepare for batch embedding
-            texts_to_embed.append(full_text)
-            video_data.append({
-                "video_id": video_id,
-                "title": title,
-                "description": desc,
-                "thumbnail": thumb,
-                "channel": channel,
-                "duration_seconds": duration_seconds
-            })
-    
-    # Batch embed remaining videos with smaller batch size for Railway
-    if texts_to_embed:
-        try:
-            # Use smaller batch size for Railway memory constraints
-            batch_embeddings = embed_batch(texts_to_embed, batch_size=8)
-            
-            for i, video_info in enumerate(video_data):
-                video_embedding = batch_embeddings[i]
-                semantic_score = cosine_similarity(query_embedding, video_embedding)
+        
+        # Batch embed remaining videos with smaller batch size
+        if texts_to_embed:
+            try:
+                # Use smaller batch size for memory constraints
+                batch_embeddings = embed_batch(texts_to_embed, batch_size=4)
                 
-                if semantic_score > 0.3:
+                if batch_embeddings is not None:
+                    for i, video_info in enumerate(video_data):
+                        if i < len(batch_embeddings):
+                            video_embedding = batch_embeddings[i]
+                            semantic_score = cosine_similarity(query_embedding, video_embedding)
+                            
+                            if semantic_score > 0.3:
+                                videos.append({
+                                    "video_id": video_info["video_id"],
+                                    "title": video_info["title"],
+                                    "description": video_info["description"],
+                                    "thumbnail": video_info["thumbnail"],
+                                    "channel": video_info["channel"],
+                                    "link": f"https://www.youtube.com/watch?v={video_info['video_id']}",
+                                    "score": float(semantic_score)
+                                })
+                                seen_ids.add(video_info["video_id"])
+            except Exception as e:
+                print(f"Batch embedding failed: {e}")
+
+        # If we have fewer than top_n, fetch more from YouTube
+        if len(videos) < top_n:
+            print(f"Only {len(videos)} videos found in DB — fetching more from YouTube...")
+            yt_results = yt_fetch_videos(query, max_results=top_n*2, video_duration=video_duration)
+            video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
+            print(f"YouTube API returned {len(video_ids)} video IDs.")
+
+            if video_ids:
+                video_details = get_video_details(video_ids)
+
+                for video in video_details:
+                    try:
+                        iso_duration = video["contentDetails"]["duration"]
+                        duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
+                    except Exception as e:
+                        print(f"Failed to parse duration: {e}")
+                        continue
+
+                    # Strict duration filtering
+                    if not duration_in_range(duration_seconds, video_duration):
+                        print(f"Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
+                        continue
+
+                    vid_id = video["id"]
+                    if vid_id in seen_ids:
+                        print(f"Skipped: {video['snippet']['title']} — duplicate video ID.")
+                        continue  # skip duplicates
+
+                    if is_probable_short(video):
+                        print(f"Skipped: {video['snippet']['title']} — likely a Short.")
+                        continue
+
+                    if video["snippet"].get("categoryId") != "27":
+                        print(f"Skipped: {video['snippet']['title']} — not educational.")
+                        continue
+
+                    title = video["snippet"]["title"]
+                    desc = video["snippet"]["description"]
+                    full_text = f"{title} {desc}"
+                    semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
+
+                    views = int(video["statistics"].get("viewCount", 0))
+                    likes = int(video["statistics"].get("likeCount", 0))
+                    popularity_score = (views + 2 * likes) / 1_000_000
+
+                    final_score = 0.7 * semantic_score + 0.3 * popularity_score
+
                     videos.append({
-                        "video_id": video_info["video_id"],
-                        "title": video_info["title"],
-                        "description": video_info["description"],
-                        "thumbnail": video_info["thumbnail"],
-                        "channel": video_info["channel"],
-                        "link": f"https://www.youtube.com/watch?v={video_info['video_id']}",
-                        "score": float(semantic_score)
+                        "video_id": vid_id,
+                        "title": title,
+                        "description": desc,
+                        "thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
+                        "channel": video["snippet"]["channelTitle"],
+                        "link": f"https://www.youtube.com/watch?v={vid_id}",
+                        "score": float(final_score)
                     })
-                    seen_ids.add(video_info["video_id"])
-        except Exception as e:
-            print(f"Batch embedding failed: {e}")
+                    seen_ids.add(vid_id)
 
-    # If we have fewer than top_n, fetch more from YouTube
-    if len(videos) < top_n:
-        print(f"Only {len(videos)} videos found in DB — fetching more from YouTube...")
-        yt_results = yt_fetch_videos(query, max_results=top_n*2, video_duration=video_duration)
-        video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
-        print(f"YouTube API returned {len(video_ids)} video IDs.")
+                    insert_video(conn, video, subject="Auto", difficulty="Medium")
 
-        if video_ids:
-            video_details = get_video_details(video_ids)
+                    if len(videos) >= top_n:
+                        break
 
-            for video in video_details:
-                try:
-                    iso_duration = video["contentDetails"]["duration"]
-                    duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
-                except Exception as e:
-                    print(f"Failed to parse duration: {e}")
-                    continue
-
-                # Strict duration filtering
-                if not duration_in_range(duration_seconds, video_duration):
-                    print(f"Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
-                    continue
-
-                vid_id = video["id"]
-                if vid_id in seen_ids:
-                    print(f"Skipped: {video['snippet']['title']} — duplicate video ID.")
-                    continue  # skip duplicates
-
-                if is_probable_short(video):
-                    print(f"Skipped: {video['snippet']['title']} — likely a Short.")
-                    continue
-
-                if video["snippet"].get("categoryId") != "27":
-                    print(f"Skipped: {video['snippet']['title']} — not educational.")
-                    continue
-
-                title = video["snippet"]["title"]
-                desc = video["snippet"]["description"]
-                full_text = f"{title} {desc}"
-                semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
-
-                views = int(video["statistics"].get("viewCount", 0))
-                likes = int(video["statistics"].get("likeCount", 0))
-                popularity_score = (views + 2 * likes) / 1_000_000
-
-                final_score = 0.7 * semantic_score + 0.3 * popularity_score
-
-                videos.append({
-                    "video_id": vid_id,
-                    "title": title,
-                    "description": desc,
-                    "thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
-                    "channel": video["snippet"]["channelTitle"],
-                    "link": f"https://www.youtube.com/watch?v={vid_id}",
-                    "score": float(final_score)
-                })
-                seen_ids.add(vid_id)
-
-                insert_video(conn, video, subject="Auto", difficulty="Medium")
-
-                if len(videos) >= top_n:
-                    break
-
-    conn.close()
-    
-    # Force garbage collection to free memory for Railway
-    gc.collect()
-    
-    elapsed_time = time.time() - start_time
-    final_memory = get_memory_usage()
-    print(f"Search completed in {elapsed_time:.2f} seconds")
-    print(f"Final memory usage: {final_memory:.1f} MB")
-    print(f"Memory delta: {final_memory - initial_memory:.1f} MB")
-    print(f"[MEMORY] Recommend end: {process.memory_info().rss / 1024 / 1024:.2f} MB")
-    
-    return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
+        conn.close()
+        
+        # Force garbage collection to free memory
+        gc.collect()
+        
+        elapsed_time = time.time() - start_time
+        final_memory = process.memory_info().rss / 1024 / 1024
+        print(f"Search completed in {elapsed_time:.2f} seconds")
+        print(f"Final memory usage: {final_memory:.1f} MB")
+        print(f"Memory delta: {final_memory - initial_memory:.1f} MB")
+        print(f"[MEMORY] Recommend end: {final_memory:.2f} MB")
+        
+        return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
+        
+    except Exception as e:
+        print(f"[ERROR] Recommend failed: {e}")
+        # Force cleanup on error
+        gc.collect()
+        return []
 
 def log_search(query, user_id="guest"):
     conn = get_connection()
