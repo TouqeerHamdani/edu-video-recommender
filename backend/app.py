@@ -59,16 +59,6 @@ def create_app(config_name=None):
     def video():
         return send_from_directory(app.static_folder, 'video.html')
     
-    @app.route("/api/health")
-    def health():
-        db_status = "connected" if check_db_connection() else "disconnected"
-        return {
-            "status": "ok", 
-            "message": "Edu Video Recommender API",
-            "database": db_status,
-            "environment": app.config['FLASK_ENV']
-        }
-    
     @app.route("/api/recommend", methods=["GET"])
     def get_recommendations():
         query = request.args.get("query", "")
@@ -110,14 +100,16 @@ def create_app(config_name=None):
         app.logger.error(f"Internal server error: {error}")
         return jsonify({"error": "Internal server error"}), 500
     
-    # Add startup health check
-    @app.before_first_request
-    def startup_health_check():
-        app.logger.info("Starting health check...")
-        if not check_db_connection():
-            app.logger.error("Database connection failed during startup")
-        else:
-            app.logger.info("Database connection successful")
+    # Health check endpoint
+    @app.route("/api/health")
+    def health():
+        db_status = "connected" if check_db_connection() else "disconnected"
+        return {
+            "status": "ok", 
+            "message": "Edu Video Recommender API",
+            "database": db_status,
+            "environment": app.config['FLASK_ENV']
+        }
     
     return app
 
