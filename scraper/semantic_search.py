@@ -15,9 +15,9 @@ def get_model():
     global _model
     if _model is None:
         try:
-            # Use the smallest model for memory
-            _model = SentenceTransformer('nreimers/tiny-sbert-nli')
-            print("Loaded nreimers/tiny-sbert-nli model (minimal memory)")
+            # Use a verified tiny SBERT model that actually exists
+            _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')  # 384 dimensions, 90MB
+            print("Loaded sentence-transformers/all-MiniLM-L6-v2 model (verified)")
         except Exception as e:
             print(f"Failed to load ML model: {e}")
             _model = None

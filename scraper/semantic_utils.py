@@ -1,8 +1,8 @@
 from sentence_transformers import SentenceTransformer
 import numpy as np
 
-# Use a lighter model for Render compatibility
-model = SentenceTransformer("nreimers/tiny-sbert-nli")  # swapped for minimal memory
+# Use a verified tiny SBERT model that actually exists
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")  # 384 dimensions, 90MB
 
 def embed_text(text):
     return model.encode([text])[0]
