@@ -3,10 +3,13 @@ import time
 from functools import lru_cache
 import gc
 from sentence_transformers import SentenceTransformer
-from scraper.db import get_connection
+from backend.database import get_session
+from backend.models import Video, UserSearch
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 import isodate
 import psutil
+from sqlalchemy import text
+from sqlalchemy.orm import joinedload
 
 # Global model instance for memory efficiency
 _model = None
@@ -62,6 +65,18 @@ def get_memory_usage():
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
+def duration_in_range(duration_seconds, video_duration):
+    """
+    Check if duration falls within the specified range.
+    """
+    if video_duration == "short":
+        return duration_seconds < 240  # < 4 minutes
+    elif video_duration == "medium":
+        return 240 <= duration_seconds < 1200  # 4-20 minutes
+    elif video_duration == "long":
+        return duration_seconds >= 1200  # >= 20 minutes
+    return True  # Default to True if no filter specified
+
 def is_probable_short(video):
     """
     Returns True if video is likely a Short: duration < 60s or contains '#shorts' in title/description.
@@ -88,115 +103,82 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     print(f"[MEMORY] Recommend start: {initial_memory:.2f} MB")
     
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
+        session = get_session()
 
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
-        
+
         # Monitor memory usage
         print(f"Initial memory usage: {initial_memory:.1f} MB")
 
-        # Fetch embedding from DB as well
-        cursor.execute("SELECT video_id, title, description, thumbnail, channel, duration, embedding FROM videos")
-        rows = cursor.fetchall()
-        
-        # Use cached embedding for query
+        # Get query embedding
         query_embedding = embed_text_cached(query)
         if query_embedding is None:
             print("[ERROR] Failed to embed query")
             return []
-            
+
+        # Build duration filter
+        duration_filter = ""
+        if video_duration == "short":
+            duration_filter = "AND duration < 240"  # < 4 minutes
+        elif video_duration == "medium":
+            duration_filter = "AND duration >= 240 AND duration < 1200"  # 4-20 minutes
+        elif video_duration == "long":
+            duration_filter = "AND duration >= 1200"  # >= 20 minutes
+
+        # Use pgvector similarity search
+        sql = f"""
+        SELECT
+            youtube_id,
+            title,
+            description,
+            thumbnail,
+            duration,
+            view_count,
+            like_count,
+            (embedding <=> :query_embedding) as similarity
+        FROM videos
+        WHERE (embedding <=> :query_embedding) < 0.7
+        {duration_filter}
+        ORDER BY embedding <=> :query_embedding
+        LIMIT :limit
+        """
+
+        result = session.execute(
+            text(sql),
+            {
+                "query_embedding": query_embedding.tolist(),
+                "limit": top_n * 2  # Get more to account for potential duplicates
+            }
+        )
+
         videos = []
         seen_ids = set()
+        video_ids = []
 
-        def duration_in_range(duration_seconds, filter_type):
-            if filter_type == "short":
-                return duration_seconds < 4 * 60
-            elif filter_type == "medium":
-                return 4 * 60 <= duration_seconds < 20 * 60
-            elif filter_type == "long":
-                return duration_seconds >= 20 * 60
-            else:
-                return True  # 'any'
+        for row in result:
+            youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
 
-        # Process videos in smaller batches for memory constraints
-        texts_to_embed = []
-        video_data = []
-        
-        for row in rows:
-            video_id, title, desc, thumb, channel, duration_iso, embedding = row
-            try:
-                duration_seconds = isodate.parse_duration(duration_iso).total_seconds()
-            except Exception:
-                continue  # skip if can't parse
-            if not duration_in_range(duration_seconds, video_duration):
-                continue  # skip if not in range
-                
-            full_text = f"{title} {desc}"
-            
-            # Use cached embedding if present, else prepare for batch embedding
-            if embedding is not None:
-                video_embedding = np.array(embedding)
-                semantic_score = cosine_similarity(query_embedding, video_embedding)
-                
-                if semantic_score > 0.3:
-                    videos.append({
-                        "video_id": video_id,
-                        "title": title,
-                        "description": desc,
-                        "thumbnail": thumb,
-                        "channel": channel,
-                        "link": f"https://www.youtube.com/watch?v={video_id}",
-                        "score": float(semantic_score)
-                    })
-                    seen_ids.add(video_id)
-            else:
-                # Prepare for batch embedding
-                texts_to_embed.append(full_text)
-                video_data.append({
-                    "video_id": video_id,
-                    "title": title,
-                    "description": desc,
-                    "thumbnail": thumb,
-                    "channel": channel,
-                    "duration_seconds": duration_seconds
-                })
-        
-        # Batch embed remaining videos with smaller batch size
-        if texts_to_embed:
-            try:
-                # Use smaller batch size for memory constraints
-                batch_embeddings = embed_batch(texts_to_embed, batch_size=4)
-                
-                if batch_embeddings is not None:
-                    for i, video_info in enumerate(video_data):
-                        if i < len(batch_embeddings):
-                            video_embedding = batch_embeddings[i]
-                            semantic_score = cosine_similarity(query_embedding, video_embedding)
-                            
-                            if semantic_score > 0.3:
-                                videos.append({
-                                    "video_id": video_info["video_id"],
-                                    "title": video_info["title"],
-                                    "description": video_info["description"],
-                                    "thumbnail": video_info["thumbnail"],
-                                    "channel": video_info["channel"],
-                                    "link": f"https://www.youtube.com/watch?v={video_info['video_id']}",
-                                    "score": float(semantic_score)
-                                })
-                                seen_ids.add(video_info["video_id"])
-            except Exception as e:
-                print(f"Batch embedding failed: {e}")
+            if youtube_id in seen_ids:
+                continue
 
-        # If we have fewer than top_n, fetch more from YouTube
-        if len(videos) < top_n:
-            print(f"Only {len(videos)} videos found in DB — fetching more from YouTube...")
-            yt_results = yt_fetch_videos(query, max_results=top_n*2, video_duration=video_duration)
-            video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item["id"]]
-            print(f"YouTube API returned {len(video_ids)} video IDs.")
+            videos.append({
+                "video_id": youtube_id,
+                "title": title,
+                "description": description,
+                "thumbnail": thumbnail,
+                "channel": "YouTube",  # We don't store channel in new schema
+                "link": f"https://www.youtube.com/watch?v={youtube_id}",
+                "score": float(1 - similarity),  # Convert distance to similarity
+                "views": view_count,
+                "likes": like_count
+            })
+            seen_ids.add(youtube_id)
+            video_ids.append(youtube_id)
 
-            if video_ids:
+        session.close()
+
+        if video_ids:
                 video_details = get_video_details(video_ids)
 
                 for video in video_details:
@@ -247,12 +229,12 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     })
                     seen_ids.add(vid_id)
 
-                    insert_video(conn, video, subject="Auto", difficulty="Medium")
+                    # insert_video(video, subject="Auto", difficulty="Medium")  # Removed as videos are already in DB
 
                     if len(videos) >= top_n:
                         break
 
-        conn.close()
+        # conn.close()  # Removed as conn is not defined
         
         # Force garbage collection to free memory
         gc.collect()
@@ -273,54 +255,84 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         return []
 
 def log_search(query, user_id="guest"):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO user_searches (user_id, query) VALUES (%s, %s)",
-            (user_id, query)
-        )
-        conn.commit()
-    conn.close()
+    """Log user search query using SQLAlchemy ORM."""
+    session = get_session()
+    try:
+        # Convert string user_id to UUID if it's not already
+        from uuid import UUID
+        if isinstance(user_id, str) and user_id != "guest":
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError:
+                user_uuid = None  # Invalid UUID, skip logging
+        else:
+            user_uuid = None  # Guest user or invalid
+
+        if user_uuid:
+            search_entry = UserSearch(user_id=user_uuid, query=query)
+            session.add(search_entry)
+            session.commit()
+    except Exception as e:
+        print(f"Failed to log search: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 def get_user_profile(user_id):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT query FROM user_searches WHERE user_id = %s ORDER BY search_time DESC LIMIT 10",
-            (user_id,)
-        )
-        queries = [row[0] for row in cur.fetchall()]
-    conn.close()
+    """Get user's search history and compute average embedding for personalization."""
+    session = get_session()
+    try:
+        # Convert string user_id to UUID if needed
+        from uuid import UUID
+        if isinstance(user_id, str):
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError:
+                return None  # Invalid UUID
+        else:
+            user_uuid = user_id
 
-    if not queries:
+        # Get recent search queries for this user
+        searches = session.query(UserSearch).filter(
+            UserSearch.user_id == user_uuid
+        ).order_by(UserSearch.search_time.desc()).limit(10).all()
+
+        queries = [search.query for search in searches]
+        session.close()
+
+        if not queries:
+            return None
+
+        embeddings = [embed_text(q) for q in queries if embed_text(q) is not None]
+        if not embeddings:
+            return None
+
+        return np.mean(embeddings, axis=0)
+    except Exception as e:
+        print(f"Failed to get user profile: {e}")
+        session.close()
         return None
 
-    embeddings = [embed_text(q) for q in queries]
-    return np.mean(embeddings, axis=0)
-
 def check_query_in_db(query):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT video_id, title, description, channel, thumbnail
-            FROM videos
-            WHERE title ILIKE %s OR description ILIKE %s
-            LIMIT 20
-        """, (f"%{query}%", f"%{query}%"))
-        rows = cur.fetchall()
-    conn.close()
+    session = get_session()
+    try:
+        videos = session.query(Video).filter(
+            Video.title.ilike(f"%{query}%") | Video.description.ilike(f"%{query}%")
+        ).limit(20).all()
 
-    return [
-        {
-            'video_id': row[0],
-            'title': row[1],
-            'description': row[2],
-            'channel': row[3],
-            'thumbnail': row[4],
-            'link': f"https://www.youtube.com/watch?v={row[0]}"
-        }
-        for row in rows
-    ]
+        return [
+            {
+                'video_id': v.youtube_id,
+                'title': v.title,
+                'description': v.description,
+                'channel': 'YouTube',
+                'thumbnail': v.thumbnail,
+                'link': f"https://www.youtube.com/watch?v={v.youtube_id}"
+            }
+            for v in videos
+        ]
+    finally:
+        session.close()
 
 if __name__ == "__main__":
     results = recommend("atom class 11", top_n=10, user_id="test_user")

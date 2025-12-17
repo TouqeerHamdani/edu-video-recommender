@@ -1,122 +1,182 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from scraper.semantic_search import recommend, log_search
-from backend.auth import auth_bp  # Import the auth blueprint
+"""
+FastAPI application for Edu Video Recommender.
+Migrated from Flask to FastAPI for async support and type safety.
+"""
+
+from fastapi import FastAPI, Request, HTTPException, Depends, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional, List
+import jwt
 import os
 import logging
-from logging.handlers import RotatingFileHandler
-from config import config
+from scraper.semantic_search import recommend, log_search
+from backend.database import init_db, test_connection
+from backend import models
 
-def create_app(config_name=None):
-    if config_name is None:
-        config_name = os.environ.get('FLASK_ENV', 'production')
-    
-    app = Flask(__name__, static_folder='../frontend', static_url_path='')
-    app.config.from_object(config[config_name])
-    
-    CORS(app)  # Allow frontend requests from any domain (you can restrict later)
-    
-    # Configure logging
-    if not app.debug:
-        if not os.path.exists('logs'):
-            os.mkdir('logs')
-        file_handler = RotatingFileHandler('logs/edu_video_recommender.log', maxBytes=10240, backupCount=10)
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
-        app.logger.info('Edu Video Recommender startup')
-    
-    # Database connection error handling
-    def check_db_connection():
-        try:
-            from scraper.db import get_connection
-            conn = get_connection()
-            conn.close()
-            return True
-        except Exception as e:
-            app.logger.error(f"Database connection failed: {e}")
-            return False
-    
-    # Register the authentication blueprint
-    app.register_blueprint(auth_bp)
-    
-    @app.route("/")
-    def home():
-        return send_from_directory(app.static_folder, 'project.html')
-    
-    @app.route("/auth")
-    def auth():
-        return send_from_directory(app.static_folder, 'auth.html')
-    
-    @app.route("/results")
-    def results():
-        return send_from_directory(app.static_folder, 'results.html')
-    
-    @app.route("/video")
-    def video():
-        return send_from_directory(app.static_folder, 'video.html')
-    
-    @app.route("/api/recommend", methods=["GET"])
-    def get_recommendations():
-        query = request.args.get("query", "")
-        user = request.args.get("user", "guest")
-        duration = request.args.get("duration", "medium")
-        allowed_durations = {"any", "short", "medium", "long"}
-        duration = duration.lower()
-        if duration not in allowed_durations:
-            app.logger.warning(f"Invalid duration: {duration}. Defaulting to 'medium'.")
-            duration = "medium"
-    
-        if not query:
-            return jsonify({"error": "Missing query"}), 400
-    
-        try:
-            # Check database connection first
-            if not check_db_connection():
-                return jsonify({"error": "Database connection unavailable"}), 503
-            
-            log_search(query, user_id=user)
-            results = recommend(query, top_n=10, user_id=user, video_duration=duration)
-            return jsonify({"results": results})
-        except Exception as e:
-            app.logger.error(f"Error in /api/recommend: {e}")
-            return jsonify({"error": "Internal server error"}), 500
-    
-    # Catch-all route for static files
-    @app.route("/<path:filename>")
-    def static_files(filename):
-        return send_from_directory(app.static_folder, filename)
-    
-    # Error handlers
-    @app.errorhandler(404)
-    def not_found_error(error):
-        return jsonify({"error": "Not found"}), 404
-    
-    @app.errorhandler(500)
-    def internal_error(error):
-        app.logger.error(f"Internal server error: {error}")
-        return jsonify({"error": "Internal server error"}), 500
-    
-    # Health check endpoint
-    @app.route("/api/health")
-    def health():
-        db_status = "connected" if check_db_connection() else "disconnected"
-        return {
-            "status": "ok", 
-            "message": "Edu Video Recommender API",
-            "database": db_status,
-            "environment": app.config['FLASK_ENV']
-        }
-    
-    return app
+# Pydantic models for request/response
+class RecommendationRequest(BaseModel):
+    query: str
+    duration: Optional[str] = "medium"
 
-# Create the app instance
-app = create_app()
+class VideoResult(BaseModel):
+    video_id: str
+    title: str
+    description: Optional[str]
+    thumbnail: Optional[str]
+    channel: str
+    link: str
+    score: float
+    views: Optional[int] = None
+    likes: Optional[int] = None
+
+class RecommendationResponse(BaseModel):
+    results: List[VideoResult]
+
+class HealthResponse(BaseModel):
+    status: str
+    message: str
+    database: str
+    orm: str
+    environment: str
+
+# JWT settings
+SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET', 'your-supabase-jwt-secret')
+
+# Create FastAPI app
+app = FastAPI(
+    title="Edu Video Recommender API",
+    description="AI-powered educational video recommendation system",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    try:
+        init_db()
+        print("Database initialized successfully")
+    except Exception as e:
+        print(f"Failed to initialize database: {e}")
+        raise
+
+# JWT dependency
+def get_current_user(request: Request) -> Optional[str]:
+    """Extract user ID from JWT token."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing or invalid"
+        )
+    
+    token = auth_header.split(' ')[1]
+    try:
+        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=['HS256'])
+        user_id = payload.get('sub')
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        return user_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
+# Routes
+@app.get("/")
+async def root():
+    return {"message": "Edu Video Recommender API", "status": "running"}
+
+@app.get("/api/health", response_model=HealthResponse)
+async def health():
+    """Health check endpoint with database and ORM status."""
+    db_success, db_message = test_connection()
+    db_status = "connected" if db_success else f"disconnected: {db_message}"
+    
+    # Check ORM functionality
+    try:
+        from backend.database import get_session
+        session = get_session()
+        video_count = session.query(models.Video).count()
+        session.close()
+        orm_status = f"working (videos: {video_count})"
+    except Exception as e:
+        orm_status = f"error: {str(e)}"
+    
+    return HealthResponse(
+        status="ok" if db_success else "error",
+        message="Edu Video Recommender API",
+        database=db_status,
+        orm=orm_status,
+        environment=os.getenv('FLASK_ENV', 'production')  # Keep for compatibility
+    )
+
+@app.get("/api/recommend", response_model=RecommendationResponse)
+async def get_recommendations(
+    query: str,
+    duration: str = "medium",
+    current_user: str = Depends(get_current_user)
+):
+    """Get video recommendations based on semantic search."""
+    allowed_durations = {"any", "short", "medium", "long"}
+    duration = duration.lower()
+    if duration not in allowed_durations:
+        duration = "medium"
+    
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query parameter is required"
+        )
+    
+    try:
+        # Check database connection
+        if not test_connection()[0]:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database connection unavailable"
+            )
+        
+        # Log search and get recommendations
+        log_search(query, user_id=current_user)
+        results = recommend(query, top_n=10, user_id=current_user, video_duration=duration)
+        
+        return RecommendationResponse(results=results)
+    
+    except Exception as e:
+        logging.error(f"Error in /api/recommend: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+# Error handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail}
+    )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_ENV") == "development"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
