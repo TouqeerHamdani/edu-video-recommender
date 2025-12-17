@@ -2,7 +2,7 @@ import numpy as np
 import time
 from functools import lru_cache
 import gc
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer  # Disabled for Phase 1
 from backend.database import get_session
 from backend.models import Video, UserSearch
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
@@ -14,48 +14,48 @@ from sqlalchemy.orm import joinedload
 # Global model instance for memory efficiency
 _model = None
 
-def get_model():
-    global _model
-    if _model is None:
-        try:
-            # Use a verified tiny SBERT model that actually exists
-            _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')  # 384 dimensions, 90MB
-            print("Loaded sentence-transformers/all-MiniLM-L6-v2 model (verified)")
-        except Exception as e:
-            print(f"Failed to load ML model: {e}")
-            _model = None
-    return _model
+# def get_model():  # Disabled for Phase 1
+#     global _model
+#     if _model is None:
+#         try:
+#             # Use a verified tiny SBERT model that actually exists
+#             _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')  # 384 dimensions, 90MB
+#             print("Loaded sentence-transformers/all-MiniLM-L6-v2 model (verified)")
+#         except Exception as e:
+#             print(f"Failed to load ML model: {e}")
+#             _model = None
+#     return _model
 
-def embed_text(text):
-    """Embed text using SentenceTransformer with Railway memory optimization"""
-    try:
-        model = get_model()
-        if model is None:
-            raise Exception("Model not loaded")
-        result = model.encode(text, convert_to_numpy=True)
-        # Don't delete model - keep it in memory for next request
-        return result
-    except Exception as e:
-        print(f"Embedding failed: {e}")
-        return None
+# def embed_text(text):  # Disabled for Phase 1
+#     """Embed text using SentenceTransformer with Railway memory optimization"""
+#     try:
+#         model = get_model()
+#         if model is None:
+#             raise Exception("Model not loaded")
+#         result = model.encode(text, convert_to_numpy=True)
+#         # Don't delete model - keep it in memory for next request
+#         return result
+#     except Exception as e:
+#         print(f"Embedding failed: {e}")
+#         return None
 
-def embed_batch(texts, batch_size=8):
-    """Embed batch of texts using SentenceTransformer"""
-    try:
-        model = get_model()
-        if model is None:
-            raise Exception("Model not loaded")
-        # Use smaller batch size for Railway memory constraints
-        results = model.encode(texts, batch_size=batch_size, convert_to_numpy=True)
-        return results
-    except Exception as e:
-        print(f"Batch embedding failed: {e}")
-        return None
+# def embed_batch(texts, batch_size=8):  # Disabled for Phase 1
+#     """Embed batch of texts using SentenceTransformer"""
+#     try:
+#         model = get_model()
+#         if model is None:
+#             raise Exception("Model not loaded")
+#         # Use smaller batch size for Railway memory constraints
+#         results = model.encode(texts, batch_size=batch_size, convert_to_numpy=True)
+#         return results
+#     except Exception as e:
+#         print(f"Batch embedding failed: {e}")
+#         return None
 
-@lru_cache(maxsize=500)  # Reduced cache size for Railway
-def embed_text_cached(text):
-    """Cached version of embed_text for repeated queries"""
-    return embed_text(text)
+# @lru_cache(maxsize=500)  # Reduced cache size for Railway
+# def embed_text_cached(text):  # Disabled for Phase 1
+#     """Cached version of embed_text for repeated queries"""
+#     return embed_text(text)
 
 def get_memory_usage():
     """Get current memory usage in MB"""
@@ -111,11 +111,11 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         # Monitor memory usage
         print(f"Initial memory usage: {initial_memory:.1f} MB")
 
-        # Get query embedding
-        query_embedding = embed_text_cached(query)
-        if query_embedding is None:
-            print("[ERROR] Failed to embed query")
-            return []
+        # Phase 1: Use text search instead of embeddings
+        # query_embedding = embed_text_cached(query)
+        # if query_embedding is None:
+        #     print("[ERROR] Failed to embed query")
+        #     return []
 
         # Build duration filter
         duration_filter = ""
@@ -126,7 +126,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         elif video_duration == "long":
             duration_filter = "AND duration >= 1200"  # >= 20 minutes
 
-        # Use pgvector similarity search
+        # Phase 1: Use text search instead of pgvector
         sql = f"""
         SELECT
             youtube_id,
@@ -135,20 +135,19 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
             thumbnail,
             duration,
             view_count,
-            like_count,
-            (embedding <=> :query_embedding) as similarity
+            like_count
         FROM videos
-        WHERE (embedding <=> :query_embedding) < 0.7
+        WHERE (title ILIKE :query OR description ILIKE :query)
         {duration_filter}
-        ORDER BY embedding <=> :query_embedding
+        ORDER BY view_count DESC, like_count DESC
         LIMIT :limit
         """
 
         result = session.execute(
             text(sql),
             {
-                "query_embedding": query_embedding.tolist(),
-                "limit": top_n * 2  # Get more to account for potential duplicates
+                "query": f"%{query}%",
+                "limit": top_n
             }
         )
 
@@ -157,7 +156,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         video_ids = []
 
         for row in result:
-            youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
+            youtube_id, title, description, thumbnail, duration, view_count, like_count = row
 
             if youtube_id in seen_ids:
                 continue
@@ -169,7 +168,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                 "thumbnail": thumbnail,
                 "channel": "YouTube",  # We don't store channel in new schema
                 "link": f"https://www.youtube.com/watch?v={youtube_id}",
-                "score": float(1 - similarity),  # Convert distance to similarity
+                "score": float(view_count + 2 * like_count) / 100000,  # Popularity score for Phase 1
                 "views": view_count,
                 "likes": like_count
             })
@@ -210,13 +209,15 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     title = video["snippet"]["title"]
                     desc = video["snippet"]["description"]
                     full_text = f"{title} {desc}"
-                    semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
+                    # Phase 1: No embeddings
+                    # semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
+                    semantic_score = 0.5  # Placeholder
 
                     views = int(video["statistics"].get("viewCount", 0))
                     likes = int(video["statistics"].get("likeCount", 0))
                     popularity_score = (views + 2 * likes) / 1_000_000
 
-                    final_score = 0.7 * semantic_score + 0.3 * popularity_score
+                    final_score = popularity_score  # Phase 1: Only popularity
 
                     videos.append({
                         "video_id": vid_id,
@@ -234,7 +235,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     if len(videos) >= top_n:
                         break
 
-        # conn.close()  # Removed as conn is not defined
+        
         
         # Force garbage collection to free memory
         gc.collect()

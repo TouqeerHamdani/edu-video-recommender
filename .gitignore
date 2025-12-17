@@ -49,6 +49,8 @@ deploy_onnx.py
 # Documentation (optional)
 DEPLOYMENT_CHECKLIST.md
 
+requirements_embedder.txt
+
 .env
 .gitignore
 
