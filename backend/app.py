@@ -14,7 +14,9 @@ import logging
 from scraper.semantic_search import recommend, log_search
 from backend.database import init_db, test_connection
 from backend import models
-
+import os
+# Vercel sets PORT env var
+port = int(os.environ.get("PORT", 8000))
 # Pydantic models for request/response
 class RecommendationRequest(BaseModel):
     query: str
