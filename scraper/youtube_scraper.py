@@ -3,7 +3,7 @@ import requests
 from dotenv import load_dotenv
 from backend.database import get_session
 from backend.models import Video
-from scraper.semantic_utils import embed_text
+#from scraper.semantic_utils import embed_text
 import isodate
 
 load_dotenv()
