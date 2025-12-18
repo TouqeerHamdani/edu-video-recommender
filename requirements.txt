@@ -5,7 +5,7 @@ python-multipart==0.0.6
 
 # Database
 SQLAlchemy==2.0.23
-psycopg2cffi==2.9.0
+pg8000==1.30.5
 pgvector==0.2.4
 alembic==1.13.0
 
