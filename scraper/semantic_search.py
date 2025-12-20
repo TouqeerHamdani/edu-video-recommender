@@ -1,13 +1,11 @@
 import numpy as np
 import time
 from functools import lru_cache
-import gc
 # from sentence_transformers import SentenceTransformer  # Disabled for Phase 1
 from backend.database import get_session
 from backend.models import Video, UserSearch
 from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
 import isodate
-import psutil
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload
 
@@ -57,11 +55,6 @@ _model = None
 #     """Cached version of embed_text for repeated queries"""
 #     return embed_text(text)
 
-def get_memory_usage():
-    """Get current memory usage in MB"""
-    process = psutil.Process()
-    return process.memory_info().rss / 1024 / 1024
-
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
@@ -94,22 +87,11 @@ def is_probable_short(video):
     return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
 def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
-    import isodate
-    import psutil
-    import gc
-    
-    process = psutil.Process()
-    initial_memory = process.memory_info().rss / 1024 / 1024
-    print(f"[MEMORY] Recommend start: {initial_memory:.2f} MB")
-    
     try:
         session = get_session()
 
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
-
-        # Monitor memory usage
-        print(f"Initial memory usage: {initial_memory:.1f} MB")
 
         # Phase 1: Use text search instead of embeddings
         # query_embedding = embed_text_cached(query)
@@ -235,24 +217,13 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
                     if len(videos) >= top_n:
                         break
 
-        
-        
-        # Force garbage collection to free memory
-        gc.collect()
-        
         elapsed_time = time.time() - start_time
-        final_memory = process.memory_info().rss / 1024 / 1024
         print(f"Search completed in {elapsed_time:.2f} seconds")
-        print(f"Final memory usage: {final_memory:.1f} MB")
-        print(f"Memory delta: {final_memory - initial_memory:.1f} MB")
-        print(f"[MEMORY] Recommend end: {final_memory:.2f} MB")
         
         return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
         
     except Exception as e:
         print(f"[ERROR] Recommend failed: {e}")
-        # Force cleanup on error
-        gc.collect()
         return []
 
 def log_search(query, user_id="guest"):
