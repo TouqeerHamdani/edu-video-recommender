@@ -86,6 +86,24 @@ def is_probable_short(video):
 
     return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
+def create_query_embedding(query):
+    """
+    Attempt to create a query embedding. 
+    Use the local model if loaded/enabled.
+    """
+    try:
+        # Check if local model can be loaded (Phase 2 or testing)
+        if _model:
+             return _model.encode(query, convert_to_numpy=True)
+        
+        # If no model, we cannot do vector search unless we use an external API.
+        # For now, return None to trigger fallback.
+        # To enable local model for testing, uncomment get_model() at top.
+        return None
+    except Exception as e:
+        print(f"Failed to create query embedding: {e}")
+        return None
+
 def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
     try:
         session = get_session()
@@ -93,129 +111,109 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
 
-        # Phase 1: Use text search instead of embeddings
-        # query_embedding = embed_text_cached(query)
-        # if query_embedding is None:
-        #     print("[ERROR] Failed to embed query")
-        #     return []
-
         # Build duration filter
-        duration_filter = ""
+        duration_filter_sql = ""
         if video_duration == "short":
-            duration_filter = "AND duration < 240"  # < 4 minutes
+            duration_filter_sql = "AND duration < 240"  # < 4 minutes
         elif video_duration == "medium":
-            duration_filter = "AND duration >= 240 AND duration < 1200"  # 4-20 minutes
+            duration_filter_sql = "AND duration >= 240 AND duration < 1200"  # 4-20 minutes
         elif video_duration == "long":
-            duration_filter = "AND duration >= 1200"  # >= 20 minutes
+            duration_filter_sql = "AND duration >= 1200"  # >= 20 minutes
 
-        # Phase 1: Use text search instead of pgvector
-        sql = f"""
-        SELECT
-            youtube_id,
-            title,
-            description,
-            thumbnail,
-            duration,
-            view_count,
-            like_count
-        FROM videos
-        WHERE (title ILIKE :query OR description ILIKE :query)
-        {duration_filter}
-        ORDER BY view_count DESC, like_count DESC
-        LIMIT :limit
-        """
+        # Attempt to get query embedding
+        query_vector = create_query_embedding(query)
+        
+        if query_vector is not None:
+            print("Using Vector Search (pgvector)")
+            # Use pgvector cosine distance operator <=>
+            # Order by distance (ASC) because lower distance = higher similarity
+            sql = f"""
+            SELECT
+                youtube_id,
+                title,
+                description,
+                thumbnail,
+                duration,
+                view_count,
+                like_count,
+                1 - (embedding <=> :query_embedding) as similarity_score
+            FROM videos
+            WHERE 1=1
+            {duration_filter_sql}
+            ORDER BY embedding <=> :query_embedding ASC
+            LIMIT :limit
+            """
+            
+            # Convert numpy array to list for SQLAlchemy
+            embedding_list = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
+            
+            result = session.execute(
+                text(sql),
+                {
+                    "query_embedding": str(embedding_list), # pgvector expects string representation or array
+                    "limit": top_n
+                }
+            )
+        else:
+            print("Using Text Search (Fallback - ILIKE)")
+            # Phase 1 Fallback: Use text search
+            sql = f"""
+            SELECT
+                youtube_id,
+                title,
+                description,
+                thumbnail,
+                duration,
+                view_count,
+                like_count,
+                0.0 as similarity_score
+            FROM videos
+            WHERE (title ILIKE :query OR description ILIKE :query)
+            {duration_filter_sql}
+            ORDER BY view_count DESC, like_count DESC
+            LIMIT :limit
+            """
 
-        result = session.execute(
-            text(sql),
-            {
-                "query": f"%{query}%",
-                "limit": top_n
-            }
-        )
+            result = session.execute(
+                text(sql),
+                {
+                    "query": f"%{query}%",
+                    "limit": top_n
+                }
+            )
 
         videos = []
         seen_ids = set()
-        video_ids = []
 
         for row in result:
-            youtube_id, title, description, thumbnail, duration, view_count, like_count = row
+            # Unpack 8 columns
+            youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
 
             if youtube_id in seen_ids:
                 continue
+
+            # Calculate final score
+            # If vector search, use similarity. If text search, use popularity.
+            if query_vector is not None:
+                final_score = float(similarity)
+            else:
+                 # Popularity score
+                 final_score = float(view_count + 2 * like_count) / 100000
 
             videos.append({
                 "video_id": youtube_id,
                 "title": title,
                 "description": description,
                 "thumbnail": thumbnail,
-                "channel": "YouTube",  # We don't store channel in new schema
+                "channel": "YouTube",
                 "link": f"https://www.youtube.com/watch?v={youtube_id}",
-                "score": float(view_count + 2 * like_count) / 100000,  # Popularity score for Phase 1
+                "score": final_score,
                 "views": view_count,
                 "likes": like_count
             })
             seen_ids.add(youtube_id)
-            video_ids.append(youtube_id)
 
         session.close()
-
-        if video_ids:
-                video_details = get_video_details(video_ids)
-
-                for video in video_details:
-                    try:
-                        iso_duration = video["contentDetails"]["duration"]
-                        duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
-                    except Exception as e:
-                        print(f"Failed to parse duration: {e}")
-                        continue
-
-                    # Strict duration filtering
-                    if not duration_in_range(duration_seconds, video_duration):
-                        print(f"Skipped: {video['snippet']['title']} — duration {duration_seconds/60:.1f} min not in range for {video_duration}.")
-                        continue
-
-                    vid_id = video["id"]
-                    if vid_id in seen_ids:
-                        print(f"Skipped: {video['snippet']['title']} — duplicate video ID.")
-                        continue  # skip duplicates
-
-                    if is_probable_short(video):
-                        print(f"Skipped: {video['snippet']['title']} — likely a Short.")
-                        continue
-
-                    if video["snippet"].get("categoryId") != "27":
-                        print(f"Skipped: {video['snippet']['title']} — not educational.")
-                        continue
-
-                    title = video["snippet"]["title"]
-                    desc = video["snippet"]["description"]
-                    full_text = f"{title} {desc}"
-                    # Phase 1: No embeddings
-                    # semantic_score = cosine_similarity(query_embedding, embed_text(full_text))
-                    semantic_score = 0.5  # Placeholder
-
-                    views = int(video["statistics"].get("viewCount", 0))
-                    likes = int(video["statistics"].get("likeCount", 0))
-                    popularity_score = (views + 2 * likes) / 1_000_000
-
-                    final_score = popularity_score  # Phase 1: Only popularity
-
-                    videos.append({
-                        "video_id": vid_id,
-                        "title": title,
-                        "description": desc,
-                        "thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
-                        "channel": video["snippet"]["channelTitle"],
-                        "link": f"https://www.youtube.com/watch?v={vid_id}",
-                        "score": float(final_score)
-                    })
-                    seen_ids.add(vid_id)
-
-                    # insert_video(video, subject="Auto", difficulty="Medium")  # Removed as videos are already in DB
-
-                    if len(videos) >= top_n:
-                        break
 
         elapsed_time = time.time() - start_time
         print(f"Search completed in {elapsed_time:.2f} seconds")

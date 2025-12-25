@@ -16,3 +16,4 @@ PyJWT==2.8.0
 # Utilities
 requests==2.31.0
 isodate==0.6.1
+supabase>=2.0.0

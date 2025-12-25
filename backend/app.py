@@ -13,7 +13,7 @@ import os
 import logging
 from scraper.semantic_search import recommend, log_search
 from backend.database import init_db, test_connection
-from backend import models
+from backend import models, auth
 import os
 # Vercel sets PORT env var
 port = int(os.environ.get("PORT", 8000))
@@ -56,11 +56,16 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000", 
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -73,34 +78,19 @@ async def startup_event():
         raise
 
 # JWT dependency
-def get_current_user(request: Request) -> Optional[str]:
-    """Extract user ID from JWT token."""
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing or invalid"
-        )
-    
-    token = auth_header.split(' ')[1]
+# JWT dependency
+async def get_current_user(request: Request) -> str:
+    """Wrapper to use the auth.py dependency logic but return just the ID for compatibility."""
+    from backend.auth import get_current_user as get_user_claims
     try:
-        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=['HS256'])
-        user_id = payload.get('sub')
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload"
-            )
-        return user_id
-    except jwt.ExpiredSignatureError:
+        user_claims = await get_user_claims(request)
+        return user_claims["id"]
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired"
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail=str(e)
         )
 
 # Routes
