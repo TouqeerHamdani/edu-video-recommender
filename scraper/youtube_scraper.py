@@ -1,9 +1,11 @@
 import os
+
+import isodate
 import requests
 from dotenv import load_dotenv
+
 from backend.database import get_session
 from backend.models import Video
-import isodate
 
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -61,7 +63,7 @@ def insert_video(video, subject="Science", difficulty="Easy"):
         )
         session.add(video_record)
         session.commit()
-    except Exception as e:
+    except Exception:
         session.rollback()
     finally:
         session.close()

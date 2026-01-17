@@ -3,134 +3,162 @@ FastAPI application for Edu Video Recommender.
 Migrated from Flask to FastAPI for async support and type safety.
 """
 
-from fastapi import FastAPI, Request, HTTPException, Depends, status
+import logging
+import os
+from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional, List
-import jwt
-import os
-import logging
-from scraper.semantic_search import recommend, log_search
-from backend.database import init_db, test_connection
-from backend import models, auth
-import os
-# Vercel sets PORT env var
-port = int(os.environ.get("PORT", 8000))
-# Pydantic models for request/response
-class RecommendationRequest(BaseModel):
-    query: str
-    duration: Optional[str] = "medium"
 
-class VideoResult(BaseModel):
-    video_id: str
-    title: str
-    description: Optional[str]
-    thumbnail: Optional[str]
-    channel: str
-    link: str
-    score: float
-    views: Optional[int] = None
-    likes: Optional[int] = None
+load_dotenv()
 
-class RecommendationResponse(BaseModel):
-    results: List[VideoResult]
+from backend import auth
+from backend.database import get_db, init_db, test_connection
+from backend.schemas import (
+    HealthResponse,
+    RecommendationResponse,
+    VideoResult,
+)
+from scraper.semantic_search import log_search, recommend
 
-class HealthResponse(BaseModel):
-    status: str
-    message: str
-    database: str
-    orm: str
-    environment: str
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# JWT settings
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET', 'your-supabase-jwt-secret')
+# --- Lifespan ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handle startup and shutdown events.
+    """
+    try:
+        logger.info("Initializing database...")
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        # In production, we might want to prevent startup if DB is critical,
+        # but for now we log and proceed (or re-raise to crash).
+        # User requested fail-fast for secrets, implies we should fail fast here too.
+        raise
+    
+    yield
+    
+    logger.info("Shutting down...")
 
-# Create FastAPI app
+# --- App Definition ---
 app = FastAPI(
     title="Edu Video Recommender API",
     description="AI-powered educational video recommendation system",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-# CORS middleware
+# --- CORS ---
+origins_env = os.getenv("ALLOWED_ORIGINS")
+if origins_env:
+    origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+else:
+    origins = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:6000",
+        "http://127.0.0.1:6000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000", 
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- Routes ---
 app.include_router(auth.router)
 
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
+# JWT Dependency Wrapper
+async def get_current_user_id(request: Request) -> str:
+    """
+    Wrapper to get user ID from auth dependency.
+    """
     try:
-        init_db()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Failed to initialize database: {e}")
-        raise
-
-# JWT dependency
-# JWT dependency
-async def get_current_user(request: Request) -> str:
-    """Wrapper to use the auth.py dependency logic but return just the ID for compatibility."""
-    from backend.auth import get_current_user as get_user_claims
-    try:
-        user_claims = await get_user_claims(request)
-        return user_claims["id"]
+        user_claims = await auth.get_current_user(request)
+        user_id = user_claims.get("id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing user id in claims"
+            )
+        return user_id
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Authentication error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail="Authentication failed"
         )
 
-# Routes
 @app.get("/")
 async def root():
     return {"message": "Edu Video Recommender API", "status": "running"}
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
-    """Health check endpoint with database and ORM status."""
+    """Health check endpoint."""
+    # Note: test_connection is sync, blocking.
     db_success, db_message = test_connection()
-    db_status = "connected" if db_success else f"disconnected: {db_message}"
     
-    # Check ORM functionality
+    # Simple ORM check
+    orm_status = "unknown"
     try:
-        from backend.database import get_session
-        session = get_session()
-        video_count = session.query(models.Video).count()
-        session.close()
-        orm_status = f"working (videos: {video_count})"
+        # We need a fresh session here. 
+        # Since get_db is a generator, we must iterate or use context manager if we adapted it.
+        # But for quick check we can use the engine directly or the raw connection?
+        # Let's use the generator manually for this check to be safe.
+
+        from backend.database import get_db
+        
+        # Check connection via engine (already done in test_connection roughly)
+        # Check models via session
+        gen = get_db()
+        session = next(gen)
+        try:
+            # Avoid importing models just for count if we can query generic
+            # But let's verify ORM mapping works
+            from backend import models
+            video_count = session.query(models.Video).count()
+            orm_status = f"working (videos: {video_count})"
+        finally:
+            # We must close/next
+            gen.close()
+            
     except Exception as e:
         orm_status = f"error: {str(e)}"
     
     return HealthResponse(
         status="ok" if db_success else "error",
         message="Edu Video Recommender API",
-        database=db_status,
+        database="connected" if db_success else f"disconnected: {db_message}",
         orm=orm_status,
-        environment=os.getenv('FLASK_ENV', 'production')  # Keep for compatibility
+        environment=os.getenv('ENV', 'production')
     )
 
 @app.get("/api/recommend", response_model=RecommendationResponse)
 async def get_recommendations(
     query: str,
     duration: str = "medium",
-    current_user: str = Depends(get_current_user)
+    current_user: str = Depends(get_current_user_id),
+    db: object = Depends(get_db)  # Injected session
 ):
-    """Get video recommendations based on semantic search."""
+    """
+    Get video recommendations.
+    """
     allowed_durations = {"any", "short", "medium", "long"}
-    duration = duration.lower()
+    duration = duration.lower() if duration else "medium"
     if duration not in allowed_durations:
         duration = "medium"
     
@@ -141,27 +169,25 @@ async def get_recommendations(
         )
     
     try:
-        # Check database connection
-        if not test_connection()[0]:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database connection unavailable"
-            )
+        # Pass the injected session to helper functions
+        log_search(query, user_id=current_user, db_session=db)
+        results = recommend(query, top_n=10, user_id=current_user, video_duration=duration, db_session=db)
         
-        # Log search and get recommendations
-        log_search(query, user_id=current_user)
-        results = recommend(query, top_n=10, user_id=current_user, video_duration=duration)
-        
-        return RecommendationResponse(results=results)
+        # Convert dict results to Pydantic models
+        valid_results = []
+        for r in results:
+            # Ensure safety if keys missing
+            valid_results.append(VideoResult(**r))
+
+        return RecommendationResponse(results=valid_results)
     
     except Exception as e:
-        logging.error(f"Error in /api/recommend: {e}")
+        logger.error(f"Error in /api/recommend: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
 
-# Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
@@ -171,4 +197,5 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    # Use environment variables for host/port
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 6000)))

@@ -1,13 +1,12 @@
-import numpy as np
 import time
-from functools import lru_cache
+
+import isodate
+import numpy as np
+from sqlalchemy import text
+
 # from sentence_transformers import SentenceTransformer  # Disabled for Phase 1
 from backend.database import get_session
-from backend.models import Video, UserSearch
-from scraper.youtube_scraper import fetch_videos as yt_fetch_videos, get_video_details, insert_video
-import isodate
-from sqlalchemy import text
-from sqlalchemy.orm import joinedload
+from backend.models import UserSearch, Video
 
 # Global model instance for memory efficiency
 _model = None
@@ -104,10 +103,23 @@ def create_query_embedding(query):
         print(f"Failed to create query embedding: {e}")
         return None
 
-def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
-    try:
-        session = get_session()
+def _get_local_session():
+    """Helper to get a session from the generator manually."""
+    gen = get_session()
+    session = next(gen)
+    return session, gen
 
+def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_session=None):
+    session = None
+    session_gen = None
+    
+    # Use provided session or create a new one
+    if db_session:
+        session = db_session
+    else:
+        session, session_gen = _get_local_session()
+
+    try:
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
 
@@ -213,7 +225,9 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
             })
             seen_ids.add(youtube_id)
 
-        session.close()
+        # Only close if we created it
+        if session_gen:
+            session_gen.close()
 
         elapsed_time = time.time() - start_time
         print(f"Search completed in {elapsed_time:.2f} seconds")
@@ -222,11 +236,21 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium"):
         
     except Exception as e:
         print(f"[ERROR] Recommend failed: {e}")
+        # Ensure cleanup on error
+        if session_gen:
+            session_gen.close()
         return []
 
-def log_search(query, user_id="guest"):
+def log_search(query, user_id="guest", db_session=None):
     """Log user search query using SQLAlchemy ORM."""
-    session = get_session()
+    session = None
+    session_gen = None
+    
+    if db_session:
+        session = db_session
+    else:
+        session, session_gen = _get_local_session()
+
     try:
         # Convert string user_id to UUID if it's not already
         from uuid import UUID
@@ -246,11 +270,19 @@ def log_search(query, user_id="guest"):
         print(f"Failed to log search: {e}")
         session.rollback()
     finally:
-        session.close()
+        if session_gen:
+            session_gen.close()
 
-def get_user_profile(user_id):
+def get_user_profile(user_id, db_session=None):
     """Get user's search history and compute average embedding for personalization."""
-    session = get_session()
+    session = None
+    session_gen = None
+    
+    if db_session:
+        session = db_session
+    else:
+        session, session_gen = _get_local_session()
+
     try:
         # Convert string user_id to UUID if needed
         from uuid import UUID
@@ -258,6 +290,7 @@ def get_user_profile(user_id):
             try:
                 user_uuid = UUID(user_id)
             except ValueError:
+                if session_gen: session_gen.close()
                 return None  # Invalid UUID
         else:
             user_uuid = user_id
@@ -268,7 +301,8 @@ def get_user_profile(user_id):
         ).order_by(UserSearch.search_time.desc()).limit(10).all()
 
         queries = [search.query for search in searches]
-        session.close()
+        # cleanup
+        if session_gen: session_gen.close()
 
         if not queries:
             return None
@@ -280,11 +314,19 @@ def get_user_profile(user_id):
         return np.mean(embeddings, axis=0)
     except Exception as e:
         print(f"Failed to get user profile: {e}")
-        session.close()
+        if session_gen:
+            session_gen.close()
         return None
 
-def check_query_in_db(query):
-    session = get_session()
+def check_query_in_db(query, db_session=None):
+    session = None
+    session_gen = None
+    
+    if db_session:
+        session = db_session
+    else:
+        session, session_gen = _get_local_session()
+
     try:
         videos = session.query(Video).filter(
             Video.title.ilike(f"%{query}%") | Video.description.ilike(f"%{query}%")
@@ -302,7 +344,8 @@ def check_query_in_db(query):
             for v in videos
         ]
     finally:
-        session.close()
+        if session_gen:
+            session_gen.close()
 
 if __name__ == "__main__":
     results = recommend("atom class 11", top_n=10, user_id="test_user")

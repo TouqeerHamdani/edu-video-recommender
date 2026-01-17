@@ -1,0 +1,23 @@
+[project]
+name = "edu-video-recommender"
+version = "0.1.0"
+description = "Educational Video Recommender API"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+# E: pycodestyle errors
+# F: pyflakes
+# B: bugbear
+# I: isort
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]

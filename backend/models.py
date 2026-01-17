@@ -5,12 +5,15 @@ SQLAlchemy ORM models for the Edu Video Recommender.
 - UserInteraction: Track user interactions (clicks, watches) with videos
 """
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
-from pgvector.sqlalchemy import Vector
 from datetime import datetime, timezone
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+
 from backend.database import Base
+
 
 class User(Base):
     """

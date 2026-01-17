@@ -1,18 +1,25 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Response, Request, Header
+import logging
+import os
+import re
+from typing import Any, Dict, Optional
+
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
-import re
-import os
-import jwt
-import logging
-from datetime import datetime, timezone
+
 from backend.client import supabase
+
+load_dotenv()
 
 # Environment variables
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+if not SUPABASE_JWT_SECRET:
+    logging.warning("SUPABASE_JWT_SECRET is not set. JWT verification will rely on Supabase API.")
+
 # SUPABASE_URL and KEY are handled in backend.client
-ENV = os.getenv("FLASK_ENV", "development") # Keeping compat with user snippet
+ENV = os.getenv("ENV", "development") # Keeping compat with user snippet
 
 router = APIRouter(prefix="/api")
 
@@ -43,9 +50,7 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
     token = None
     
     # Debug logging
-    logging.info(f"Headers: {request.headers}")
-    logging.info(f"Cookies: {request.cookies}")
-
+    logging.debug("Checking for authentication token")
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
     else:
@@ -55,26 +60,26 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
         logging.warning("No token found in Authorization header or cookies")
         raise HTTPException(status_code=401, detail="Missing token")
 
-    if not SUPABASE_JWT_SECRET:
-        logging.warning("SUPABASE_JWT_SECRET not set; cannot verify token")
-        raise HTTPException(status_code=500, detail="Server misconfiguration")
-
     try:
-        # Verify token
-        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
-        user_id = payload.get("sub")
-        email = payload.get("email")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token payload")
+        # Verify token using Supabase Auth API
+        # This ensures the token is valid, not revoked, and fresh
+        user_response = supabase.auth.get_user(token)
+        user = user_response.user
         
-        # Construct user dict similar to user's snippet
-        return {"id": user_id, "email": email, **payload}
+        if not user:
+             raise HTTPException(status_code=401, detail="Invalid token")
 
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError as e:
-        logging.exception("Token verification failed")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        # Construct user dict
+        return {
+            "id": user.id, 
+            "email": user.email, 
+            "user_metadata": user.user_metadata,
+            # Add other necessary fields if needed by downstream
+        }
+
+    except Exception as e:
+        logging.error(f"Token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # --- Routes ---
 
@@ -111,7 +116,7 @@ async def register(user: UserRegister):
         raise HTTPException(status_code=502, detail=f"Upstream error: {err_str}")
 
 @router.post("/login")
-async def login(user: UserLogin, response: Response):
+async def login(user: UserLogin):
     email = user.email.strip().lower()
     password = user.password
 
@@ -125,11 +130,13 @@ async def login(user: UserLogin, response: Response):
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
-
+    response=JSONResponse({"message": "Login successful"})
     access_token = auth_response.session.access_token
     refresh_token = auth_response.session.refresh_token
     
     secure_flag = ENV == "production"
+    # SameSite must be None for cross-site cookie access (like OAuth), but None requires Secure.
+    samesite_val = "none" if secure_flag else "lax"
     
     # Set HttpOnly cookies
     response.set_cookie(
@@ -137,8 +144,9 @@ async def login(user: UserLogin, response: Response):
         value=access_token, 
         httponly=True, 
         secure=secure_flag, 
-        samesite="lax", 
-        max_age=3600 # 1 hour
+        samesite=samesite_val, 
+        max_age=3600, # 1 hour
+        path="/"
     )
     if refresh_token:
         response.set_cookie(
@@ -146,14 +154,18 @@ async def login(user: UserLogin, response: Response):
             value=refresh_token, 
             httponly=True, 
             secure=secure_flag, 
-            samesite="lax", 
-            max_age=604800 # 7 days
+            samesite=samesite_val, 
+            max_age=604800, # 7 days
+            path="/"
         )
-
-    return {"msg": "ok", "user": {"id": auth_response.user.id, "email": auth_response.user.email}}
-
+        
+    if not auth_response.user:
+        raise HTTPException(status_code=500, detail="No user returned")
+        
+    return response
+    
 @router.post("/refresh")
-async def refresh(request: Request, response: Response):
+async def refresh(request: Request):
     refresh_token = request.cookies.get("sb-refresh-token")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
@@ -167,19 +179,22 @@ async def refresh(request: Request, response: Response):
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
-
+        
+    response = JSONResponse({"message": "Refresh successful"})
     access_token = auth_response.session.access_token
     new_refresh_token = auth_response.session.refresh_token
 
     secure_flag = ENV == "production"
+    samesite_val = "none" if secure_flag else "lax"
 
     response.set_cookie(
         key="sb-access-token",
         value=access_token,
         httponly=True,
         secure=secure_flag,
-        samesite="lax",
-        max_age=3600
+        samesite=samesite_val,
+        max_age=3600,
+        path="/"
     )
     if new_refresh_token:
         response.set_cookie(
@@ -187,12 +202,12 @@ async def refresh(request: Request, response: Response):
             value=new_refresh_token,
             httponly=True,
             secure=secure_flag,
-            samesite="lax",
-            max_age=604800
-        )
+            samesite=samesite_val,
+            max_age=604800,
+            path="/"
+            )
+    return response
     
-    return {"msg": "ok"}
-
 @router.get("/me")
 async def me(user: Dict[str, Any] = Depends(get_current_user)):
     return {
@@ -221,10 +236,9 @@ async def google_oauth():
         # The user snippet returns jsonify({"url": resp.url})
         # supabase-py sign_in_with_oauth returns `OAuthResponse` which has `url`.
         resp = supabase.auth.sign_in_with_oauth({"provider": "google"})
-        if hasattr(resp, 'url') and resp.url:
+        if hasattr(resp, 'url'):
              return {"url": resp.url}
-        # Fallback if the response structure is different (older versions returned dict sometimes)
-        return {"url": resp.url}
-    except Exception as e:
+        raise HTTPException(status_code=500, detail="OAuth response missing URL")
+    except Exception:
         logging.exception("Google OAuth failed")
-        raise HTTPException(status_code=500, detail=f"OAuth error: {str(e)}")
+        raise HTTPException(status_code=500, detail="OAuth initialization failed")

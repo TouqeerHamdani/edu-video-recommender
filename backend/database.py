@@ -4,9 +4,10 @@ Uses Supabase PostgreSQL with pgvector support.
 """
 
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
 
@@ -36,12 +37,20 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
 
-def get_session():
+def get_db():
     """
     Dependency function to get a database session.
-    Usage in Flask: session = get_session()
+    Yields a session and ensures it closes after request.
+    Usage in FastAPI: def route(db: Session = Depends(get_db)):
     """
-    return SessionLocal()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Alias for compatibility if needed, but get_db is standard
+get_session = get_db
 
 
 def init_db():

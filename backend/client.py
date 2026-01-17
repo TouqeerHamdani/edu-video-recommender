@@ -1,10 +1,11 @@
 import os
-from supabase import create_client, Client
 
-url: str = os.environ.get("supabaseurl")
-key: str = os.environ.get("supabasekey")
+from supabase import Client, create_client
 
-if not url or not key:
+_url: str = os.environ.get("supabaseurl")
+_key: str = os.environ.get("supabasekey")
+
+if not _url or not _key:
     raise ValueError("supabaseurl and supabasekey environment variables must be set")
 
-supabase: Client = create_client(url, key)
+supabase: Client = create_client(_url, _key)
