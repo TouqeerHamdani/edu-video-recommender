@@ -68,11 +68,21 @@ class TestAuthCookies(unittest.TestCase):
         # fastAPI TestClient is based on httpx. 
         # We can inspect `response.headers["set-cookie"]` to see raw attributes.
         
-        set_cookie_header = response.headers["set-cookie"]
+        # Get list of all Set-Cookie headers
+        set_cookie_headers = response.headers.get_list("set-cookie")
         
-        # For development: Secure should NOT be present (or Secure=False implied by absence), SameSite=Lax
-        self.assertNotIn("Secure", set_cookie_header)  # Simplistic check
-        self.assertIn("SameSite=Lax", set_cookie_header)
+        # Check assertions across all cookies
+        # 1. At least one cookie must be SameSite=Lax
+        has_samesite_lax = any("SameSite=Lax" in header for header in set_cookie_headers)
+        self.assertTrue(has_samesite_lax, f"No cookie with SameSite=Lax found in {set_cookie_headers}")
+
+        # 2. No cookie should have standalone Secure attribute
+        # We check roughly for "; Secure" or just "Secure" at end, but simplistic check "Secure" might false match
+        # strict check: substring "; Secure" or " Secure;" or exact "Secure" (rare).
+        # Better: check if "Secure" appears as a flag. 
+        # For this test, user asked to assert "Secure" is NOT present.
+        has_secure = any("Secure" in header for header in set_cookie_headers)
+        self.assertFalse(has_secure, f"Found Secure attribute in cookies: {set_cookie_headers}")
 
     @patch("backend.auth.supabase")
     def test_login_cookies_production(self, mock_supabase):
@@ -104,17 +114,17 @@ class TestAuthCookies(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         
-        set_cookie_header = response.headers["set-cookie"]
+        # Get list of all Set-Cookie headers
+        set_cookie_headers = response.headers.get_list("set-cookie")
         
-        # For production: Secure SHOULD be present, SameSite=Lax (Wait, code says None if production)
-        # Let's check the code: samesite="none" if secure_flag else "lax"
-        # Wait, the user code had `samesite="none" if secure_flag else "lax"`. 
-        # In header it usually appears as `SameSite=None`.
+        # Join them for easier checking or iterate
+        combined_cookies = ", ".join(set_cookie_headers)
         
-        self.assertIn("Secure", set_cookie_header)
-        # Note: TestClient/httpx might normalize headers. 
-        # If strict check fails, we will debug output.
-        self.assertTrue("SameSite=None" in set_cookie_header or "samesite=none" in set_cookie_header.lower())
+        # For production: Secure SHOULD be present
+        self.assertIn("Secure", combined_cookies)
+        
+        # SameSite=None should be present
+        self.assertTrue("samesite=none" in combined_cookies.lower(), f"SameSite=None not found in {combined_cookies}")
 
 if __name__ == "__main__":
     unittest.main()

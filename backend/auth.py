@@ -239,6 +239,8 @@ async def google_oauth():
         if hasattr(resp, 'url'):
              return {"url": resp.url}
         raise HTTPException(status_code=500, detail="OAuth response missing URL")
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
         logging.exception("Google OAuth failed")
-        raise HTTPException(status_code=500, detail="OAuth initialization failed")
+        raise HTTPException(status_code=500, detail="OAuth initialization failed") from e

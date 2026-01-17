@@ -86,13 +86,10 @@ semantic_search.create_query_embedding = MagicMock(return_value=[0.1] * 384)
 
 results_vector = semantic_search.recommend("math", top_n=2)
 
-if semantic_search.text.called:
-    sql_arg_vector = str(semantic_search.text.call_args[0][0])
-    if "<=>" in sql_arg_vector:
-         print("PASS: Vector search uses <=> operator")
-    else:
-         print(f"FAIL: SQL does not look like vector search: {sql_arg_vector}")
-else:
-    print("FAIL: sqlalchemy.text() not called for vector search")
+assert semantic_search.text.called, "sqlalchemy.text() was not called for vector search"
+
+sql_arg_vector = str(semantic_search.text.call_args[0][0])
+assert "<=>" in sql_arg_vector, f"SQL does not look like vector search: {sql_arg_vector}"
+print("PASS: Vector search uses <=> operator")
 
 print("Verification Complete")
