@@ -69,21 +69,8 @@ def duration_in_range(duration_seconds, video_duration):
         return duration_seconds >= 1200  # >= 20 minutes
     return True  # Default to True if no filter specified
 
-def is_probable_short(video):
-    """
-    Returns True if video is likely a Short: duration < 60s or contains '#shorts' in title/description.
-    """
-    try:
-        iso_duration = video["contentDetails"]["duration"]
-        duration_seconds = isodate.parse_duration(iso_duration).total_seconds()
-    except Exception as e:
-        print(f"⚠️ Failed to parse duration: {e}")
-        return True  # Assume short if unsure
 
-    title = video["snippet"]["title"].lower()
-    description = video["snippet"]["description"].lower()
 
-    return duration_seconds < 60 or "#shorts" in title or "#shorts" in description
 
 def create_query_embedding(query):
     """
@@ -122,6 +109,33 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
     try:
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
+        
+        # === STEP 1: Check if we have enough videos in DB ===
+        from scraper.youtube_scraper import fetch_and_store_videos
+        
+        # Count matching videos in database
+        db_videos = check_query_in_db(query, db_session=session)
+        db_count = len(db_videos) if db_videos else 0
+        print(f"📊 Found {db_count} matching videos in database")
+        
+        # === STEP 2: If not enough, fetch from YouTube API ===
+        if db_count < top_n:
+            print(f"⚠️ Not enough videos in DB ({db_count} < {top_n}), fetching from YouTube...")
+            try:
+                inserted = fetch_and_store_videos(
+                    query, 
+                    max_results=20, 
+                    video_duration=video_duration,
+                    db_session=session
+                )
+                if inserted > 0:
+                    session.commit()  # Commit newly inserted videos
+                    print(f"✅ Added {inserted} new videos from YouTube")
+            except Exception as yt_error:
+                print(f"⚠️ YouTube fetch failed: {yt_error}")
+                # Continue with whatever we have in DB
+        
+        # === STEP 3: Search and recommend from database ===
 
         # Build duration filter
         duration_filter_sql = ""

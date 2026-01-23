@@ -85,7 +85,9 @@ async def get_current_user_id(request: Request) -> str:
     Wrapper to get user ID from auth dependency.
     """
     try:
-        user_claims = await auth.get_current_user(request)
+        # Extract the Authorization header manually
+        authorization = request.headers.get("Authorization")
+        user_claims = await auth.get_current_user(request, authorization)
         user_id = user_claims.get("id")
         if not user_id:
             raise HTTPException(

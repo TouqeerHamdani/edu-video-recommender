@@ -42,7 +42,7 @@ class Video(Base):
     upload_date = Column(String(50), nullable=True)  # ISO 8601 format
     view_count = Column(Integer, default=0)
     like_count = Column(Integer, default=0)
-    embedding = Column(Vector(384), nullable=False)  # MiniLM-L6-v2 produces 384-dim vectors
+    embedding = Column(Vector(384), nullable=True)  # MiniLM-L6-v2 produces 384-dim vectors (nullable for Phase 1)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationships
