@@ -1,58 +1,55 @@
 import time
+import os
+import logging
 
-import isodate
+import requests
 import numpy as np
 from sqlalchemy import text
 
-# from sentence_transformers import SentenceTransformer  # Disabled for Phase 1
 from backend.database import get_session
 from backend.models import UserSearch, Video
 
-# Global model instance for memory efficiency
-_model = None
+# Cloudflare Workers AI configuration
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
+CLOUDFLARE_BGE_URL = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/baai/bge-small-en-v1.5"
 
-# def get_model():  # Disabled for Phase 1
-#     global _model
-#     if _model is None:
-#         try:
-#             # Use a verified tiny SBERT model that actually exists
-#             _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')  # 384 dimensions, 90MB
-#             print("Loaded sentence-transformers/all-MiniLM-L6-v2 model (verified)")
-#         except Exception as e:
-#             print(f"Failed to load ML model: {e}")
-#             _model = None
-#     return _model
 
-# def embed_text(text):  # Disabled for Phase 1
-#     """Embed text using SentenceTransformer with Railway memory optimization"""
-#     try:
-#         model = get_model()
-#         if model is None:
-#             raise Exception("Model not loaded")
-#         result = model.encode(text, convert_to_numpy=True)
-#         # Don't delete model - keep it in memory for next request
-#         return result
-#     except Exception as e:
-#         print(f"Embedding failed: {e}")
-#         return None
+def create_query_embedding(query):
+    """
+    Create query embedding using Cloudflare Workers AI bge-small-en-v1.5.
+    Returns 384-dimensional embedding for vector search.
+    """
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        logging.warning("Cloudflare credentials not set. Vector search disabled.")
+        return None
+    
+    try:
+        response = requests.post(
+            CLOUDFLARE_BGE_URL,
+            headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
+            json={"text": query},
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            logging.error(f"Cloudflare API error: {response.status_code} - {response.text}")
+            return None
+        
+        result = response.json()
+        
+        # Extract embedding from response
+        if result.get("success") and result.get("result", {}).get("data"):
+            embedding = result["result"]["data"][0]
+            return np.array(embedding, dtype=np.float32)
+        else:
+            logging.error(f"Unexpected Cloudflare response: {result}")
+            return None
+        
+    except Exception as e:
+        logging.error(f"Failed to create query embedding: {e}")
+        return None
 
-# def embed_batch(texts, batch_size=8):  # Disabled for Phase 1
-#     """Embed batch of texts using SentenceTransformer"""
-#     try:
-#         model = get_model()
-#         if model is None:
-#             raise Exception("Model not loaded")
-#         # Use smaller batch size for Railway memory constraints
-#         results = model.encode(texts, batch_size=batch_size, convert_to_numpy=True)
-#         return results
-#     except Exception as e:
-#         print(f"Batch embedding failed: {e}")
-#         return None
-
-# @lru_cache(maxsize=500)  # Reduced cache size for Railway
-# def embed_text_cached(text):  # Disabled for Phase 1
-#     """Cached version of embed_text for repeated queries"""
-#     return embed_text(text)
 
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
@@ -69,26 +66,6 @@ def duration_in_range(duration_seconds, video_duration):
         return duration_seconds >= 1200  # >= 20 minutes
     return True  # Default to True if no filter specified
 
-
-
-
-def create_query_embedding(query):
-    """
-    Attempt to create a query embedding. 
-    Use the local model if loaded/enabled.
-    """
-    try:
-        # Check if local model can be loaded (Phase 2 or testing)
-        if _model:
-             return _model.encode(query, convert_to_numpy=True)
-        
-        # If no model, we cannot do vector search unless we use an external API.
-        # For now, return None to trigger fallback.
-        # To enable local model for testing, uncomment get_model() at top.
-        return None
-    except Exception as e:
-        print(f"Failed to create query embedding: {e}")
-        return None
 
 def _get_local_session():
     """Helper to get a session from the generator manually."""
