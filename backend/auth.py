@@ -220,8 +220,16 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
 async def logout(user: Dict[str, Any] = Depends(get_current_user)):
     # Build response first, then delete cookies on it
     response = JSONResponse({"msg": "ok"})
-    response.delete_cookie("sb-access-token", path="/")
-    response.delete_cookie("sb-refresh-token", path="/")
+    secure_flag = ENV == "production"
+    samesite_val = "none" if secure_flag else "lax"
+    response.delete_cookie(
+        "sb-access-token", path="/",
+        httponly=True, secure=secure_flag, samesite=samesite_val
+    )
+    response.delete_cookie(
+        "sb-refresh-token", path="/",
+        httponly=True, secure=secure_flag, samesite=samesite_val
+    )
     
     # Sign out from Supabase to invalidate the session server-side
     try:
