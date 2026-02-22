@@ -46,17 +46,16 @@ class TestHealthEndpoint:
 
 
 class TestRootEndpoint:
-    """Tests for the root endpoint."""
+    """Tests for the root endpoint (serves homepage HTML)."""
 
     def test_root_returns_200(self, client):
         """GET / should return 200 OK."""
         response = client.get("/")
         assert response.status_code == 200
 
-    def test_root_returns_message(self, client):
-        """Root should return API info."""
+    def test_root_returns_html(self, client):
+        """Root should return HTML content (project.html)."""
         response = client.get("/")
-        data = response.json()
+        content_type = response.headers.get("content-type", "")
+        assert "text/html" in content_type
 
-        assert "message" in data
-        assert "Edu Video Recommender" in data["message"]

@@ -67,6 +67,18 @@ def duration_in_range(duration_seconds, video_duration):
     return True  # Default to True if no filter specified
 
 
+def _build_duration_orm_filter(video_duration):
+    """Build SQLAlchemy ORM filter conditions for duration."""
+    from sqlalchemy import and_
+    if video_duration == "short":
+        return Video.duration < 240
+    elif video_duration == "medium":
+        return and_(Video.duration >= 240, Video.duration < 1200)
+    elif video_duration == "long":
+        return Video.duration >= 1200
+    return None  # "any" or unrecognized — no filter
+
+
 def _get_local_session():
     """Helper to get a session from the generator manually."""
     gen = get_session()
@@ -90,10 +102,10 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
         # === STEP 1: Check if we have enough videos in DB ===
         from scraper.youtube_scraper import fetch_and_store_videos
         
-        # Count matching videos in database
-        db_videos = check_query_in_db(query, db_session=session)
+        # Count matching videos in database (with duration filter)
+        db_videos = check_query_in_db(query, video_duration=video_duration, db_session=session)
         db_count = len(db_videos) if db_videos else 0
-        print(f"📊 Found {db_count} matching videos in database")
+        print(f"📊 Found {db_count} matching videos in database (duration: {video_duration})")
         
         # === STEP 2: If not enough, fetch from YouTube API ===
         if db_count < top_n:
@@ -141,7 +153,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
                 like_count,
                 1 - (embedding <=> :query_embedding) as similarity_score
             FROM videos
-            WHERE 1=1
+            WHERE embedding IS NOT NULL
             {duration_filter_sql}
             ORDER BY embedding <=> :query_embedding ASC
             LIMIT :limit
@@ -198,9 +210,11 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
             # Calculate final score
             # If vector search, use similarity. If text search, use popularity.
             if query_vector is not None:
-                final_score = float(similarity)
+                final_score = float(similarity) if similarity is not None else 0.0
             else:
                  # Popularity score
+                 view_count = view_count or 0
+                 like_count = like_count or 0
                  final_score = float(view_count + 2 * like_count) / 100000
 
             videos.append({
@@ -215,6 +229,49 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
                 "likes": like_count
             })
             seen_ids.add(youtube_id)
+
+        # Fallback: if vector search returned 0 results (e.g. new videos without embeddings),
+        # retry with text search so freshly fetched YouTube videos still appear
+        if not videos and query_vector is not None:
+            print("⚠️ Vector search returned 0 results, falling back to text search...")
+            fallback_sql = f"""
+            SELECT
+                youtube_id,
+                title,
+                description,
+                thumbnail,
+                duration,
+                view_count,
+                like_count,
+                0.0 as similarity_score
+            FROM videos
+            WHERE (title ILIKE :query OR description ILIKE :query)
+            {duration_filter_sql}
+            ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
+            LIMIT :limit
+            """
+            fallback_result = session.execute(
+                text(fallback_sql),
+                {"query": f"%{query}%", "limit": top_n}
+            )
+            for row in fallback_result:
+                youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
+                if youtube_id in seen_ids:
+                    continue
+                view_count = view_count or 0
+                like_count = like_count or 0
+                videos.append({
+                    "video_id": youtube_id,
+                    "title": title,
+                    "description": description,
+                    "thumbnail": thumbnail,
+                    "channel": "YouTube",
+                    "link": f"https://www.youtube.com/watch?v={youtube_id}",
+                    "score": float(view_count + 2 * like_count) / 100000,
+                    "views": view_count,
+                    "likes": like_count
+                })
+                seen_ids.add(youtube_id)
 
         # Only close if we created it
         if session_gen:
@@ -256,10 +313,12 @@ def log_search(query, user_id="guest", db_session=None):
         if user_uuid:
             search_entry = UserSearch(user_id=user_uuid, query=query)
             session.add(search_entry)
-            session.commit()
+            if not db_session:
+                session.commit()  # Only commit if we own the session
     except Exception as e:
         print(f"Failed to log search: {e}")
-        session.rollback()
+        if not db_session:
+            session.rollback()  # Only rollback if we own the session
     finally:
         if session_gen:
             session_gen.close()
@@ -298,7 +357,11 @@ def get_user_profile(user_id, db_session=None):
         if not queries:
             return None
 
-        embeddings = [embed_text(q) for q in queries if embed_text(q) is not None]
+        embeddings = []
+        for q in queries:
+            emb = create_query_embedding(q)
+            if emb is not None:
+                embeddings.append(emb)
         if not embeddings:
             return None
 
@@ -309,7 +372,7 @@ def get_user_profile(user_id, db_session=None):
             session_gen.close()
         return None
 
-def check_query_in_db(query, db_session=None):
+def check_query_in_db(query, video_duration="any", db_session=None):
     session = None
     session_gen = None
     
@@ -319,9 +382,16 @@ def check_query_in_db(query, db_session=None):
         session, session_gen = _get_local_session()
 
     try:
-        videos = session.query(Video).filter(
-            Video.title.ilike(f"%{query}%") | Video.description.ilike(f"%{query}%")
-        ).limit(20).all()
+        # Base text filter
+        text_filter = Video.title.ilike(f"%{query}%") | Video.description.ilike(f"%{query}%")
+        q = session.query(Video).filter(text_filter)
+
+        # Apply duration filter if specified
+        duration_filter = _build_duration_orm_filter(video_duration)
+        if duration_filter is not None:
+            q = q.filter(duration_filter)
+
+        videos = q.limit(20).all()
 
         return [
             {

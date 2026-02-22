@@ -1,24 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <title>Search Results - EduTV</title>
-  <link rel="stylesheet" href="project.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/static/project.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
 </head>
+
 <body>
   <div class="topbar">
-    <div class="logo">EduTV</div>
+    <a href="/" class="logo" style="text-decoration:none; color:white;">EduTV</a>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Search for topics...">
       <button id="searchBtn"><i class="fas fa-search"></i></button>
-      <div class="empty"></div>
     </div>
+    <span id="authNav" style="margin-left:auto; font-size:0.9rem;">
+      <a href="/auth" id="loginBtn" style="color:#007bff; text-decoration:none;">Login</a>
+      <span id="userInfo" style="display:none; color:#ccc;">
+        <span id="userEmail"></span>
+        &nbsp;|&nbsp;
+        <a href="#" id="logoutBtn" style="color:#ff6b6b; text-decoration:none;">Logout</a>
+      </span>
+    </span>
   </div>
 
   <div class="hero" style="height: 30px; padding: 30px 0; background: none;">
-    <h2 style="margin-top: 10px; text-align: center; color: #444;">Search Results</h2>
+    <h2 style="margin-top: 10px; text-align: center; color: #e4e4e7;">Search Results</h2>
   </div>
 
   <section id="results" class="video-section">
@@ -29,7 +38,8 @@
     <p><a href="/">Back to Home</a></p>
   </footer>
 
-  <script src="project.js"></script>
-  <script src="results.js"></script>
+  <script src="/static/project.js"></script>
+  <script src="/static/results.js"></script>
 </body>
+
 </html>

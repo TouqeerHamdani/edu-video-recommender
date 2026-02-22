@@ -1,10 +1,12 @@
-// Toggle between login and register forms
+// --- Auth page logic ---
+
 const loginTab = document.getElementById('loginTab');
 const registerTab = document.getElementById('registerTab');
 const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
 const authMessage = document.getElementById('authMessage');
 
+// Tab switching
 loginTab.addEventListener('click', () => {
     loginTab.classList.add('active');
     registerTab.classList.remove('active');
@@ -21,59 +23,62 @@ registerTab.addEventListener('click', () => {
     authMessage.textContent = '';
 });
 
+// --- Login ---
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     authMessage.textContent = '';
-    const username = document.getElementById('loginUsername').value.trim();
+    authMessage.classList.remove('auth-success');
+
+    const email = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;
+
     try {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            credentials: 'include',
+            body: JSON.stringify({ email, password })
         });
         const data = await res.json();
+
         if (res.ok) {
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('username', data.username);
             authMessage.textContent = 'Login successful! Redirecting...';
             authMessage.classList.add('auth-success');
-            setTimeout(() => { window.location.href = '/'; }, 1200);
+            setTimeout(() => { window.location.href = '/'; }, 1000);
         } else {
-            authMessage.textContent = data.error || 'Login failed.';
-            authMessage.classList.remove('auth-success');
+            authMessage.textContent = data.detail || data.error || 'Login failed.';
         }
     } catch (err) {
-        authMessage.textContent = 'Network error.';
-        authMessage.classList.remove('auth-success');
+        authMessage.textContent = 'Network error. Please try again.';
     }
 });
 
+// --- Register ---
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     authMessage.textContent = '';
-    const username = document.getElementById('registerUsername').value.trim();
+    authMessage.classList.remove('auth-success');
+
     const email = document.getElementById('registerEmail').value.trim();
     const password = document.getElementById('registerPassword').value;
+
     try {
         const res = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, email, password })
+            credentials: 'include',
+            body: JSON.stringify({ email, password })
         });
         const data = await res.json();
+
         if (res.ok) {
             authMessage.textContent = 'Registration successful! You can now log in.';
             authMessage.classList.add('auth-success');
-            setTimeout(() => {
-                loginTab.click();
-            }, 1200);
+            setTimeout(() => { loginTab.click(); }, 1500);
         } else {
-            authMessage.textContent = data.error || 'Registration failed.';
-            authMessage.classList.remove('auth-success');
+            authMessage.textContent = data.detail || data.error || 'Registration failed.';
         }
     } catch (err) {
-        authMessage.textContent = 'Network error.';
-        authMessage.classList.remove('auth-success');
+        authMessage.textContent = 'Network error. Please try again.';
     }
-}); 
+});

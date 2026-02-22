@@ -6,18 +6,23 @@ Migrated from Flask to FastAPI for async support and type safety.
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
 from backend import auth
 from backend.database import get_db, init_db, test_connection
+from backend.models import UserInteraction, Video
 from backend.schemas import (
     HealthResponse,
+    InteractionRequest,
+    InteractionResponse,
     RecommendationResponse,
     VideoResult,
 )
@@ -64,8 +69,6 @@ else:
     origins = [
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "http://localhost:6000",
-        "http://127.0.0.1:6000",
     ]
 
 app.add_middleware(
@@ -75,6 +78,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Static Files ---
+# Resolve frontend directory relative to project root
+frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+if frontend_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
 
 # --- Routes ---
 app.include_router(auth.router)
@@ -104,9 +113,30 @@ async def get_current_user_id(request: Request) -> str:
             detail="Authentication failed"
         )
 
-@app.get("/")
-async def root():
-    return {"message": "Edu Video Recommender API", "status": "running"}
+# --- HTML Page Routes ---
+
+def _serve_frontend_file(filename: str):
+    """Return a FileResponse for a frontend file, or raise 404 if missing."""
+    file_path = frontend_dir / filename
+    if not frontend_dir.is_dir() or not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{filename} not found")
+    return FileResponse(str(file_path))
+
+@app.get("/", include_in_schema=False)
+async def serve_home():
+    return _serve_frontend_file("project.html")
+
+@app.get("/auth", include_in_schema=False)
+async def serve_auth():
+    return _serve_frontend_file("auth.html")
+
+@app.get("/results", include_in_schema=False)
+async def serve_results():
+    return _serve_frontend_file("results.html")
+
+@app.get("/video", include_in_schema=False)
+async def serve_video():
+    return _serve_frontend_file("video.html")
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
@@ -152,7 +182,7 @@ async def health():
 @app.get("/api/recommend", response_model=RecommendationResponse)
 async def get_recommendations(
     query: str,
-    duration: str = "medium",
+    duration: str = "any",
     current_user: str = Depends(get_current_user_id),
     db: object = Depends(get_db)  # Injected session
 ):
@@ -160,9 +190,9 @@ async def get_recommendations(
     Get video recommendations.
     """
     allowed_durations = {"any", "short", "medium", "long"}
-    duration = duration.lower() if duration else "medium"
+    duration = duration.lower() if duration else "any"
     if duration not in allowed_durations:
-        duration = "medium"
+        duration = "any"
     
     if not query:
         raise HTTPException(
@@ -190,6 +220,55 @@ async def get_recommendations(
             detail="Internal server error"
         )
 
+
+@app.post("/api/interactions", response_model=InteractionResponse, status_code=status.HTTP_201_CREATED)
+async def log_interaction(
+    interaction: InteractionRequest,
+    current_user: str = Depends(get_current_user_id),
+    db: object = Depends(get_db),
+):
+    """
+    Log a user interaction (click, watch, like, rating) with a video.
+    """
+    try:
+        # Look up video by youtube_id (string) since frontend sends YouTube IDs
+        video = db.query(Video).filter(Video.youtube_id == interaction.video_id).first()
+        if not video:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with youtube_id '{interaction.video_id}' not found",
+            )
+
+        new_interaction = UserInteraction(
+            user_id=current_user,
+            video_id=video.id,  # Use the DB integer PK for the FK
+            interaction_type=interaction.interaction_type,
+            rating=interaction.rating,
+        )
+        db.add(new_interaction)
+        db.commit()
+        db.refresh(new_interaction)
+
+        logger.info(
+            f"Logged interaction: user={current_user}, video={interaction.video_id}, type={interaction.interaction_type}"
+        )
+
+        return InteractionResponse(
+            message="Interaction logged successfully",
+            interaction_id=new_interaction.id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error logging interaction: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to log interaction",
+        )
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
@@ -200,4 +279,4 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 if __name__ == "__main__":
     import uvicorn
     # Use environment variables for host/port
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 6000)))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

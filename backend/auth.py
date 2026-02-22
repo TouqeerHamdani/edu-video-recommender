@@ -217,18 +217,19 @@ async def me(user: Dict[str, Any] = Depends(get_current_user)):
     }
 
 @router.post("/logout")
-async def logout(response: Response, user: Dict[str, Any] = Depends(get_current_user)):
-    # Clear cookies
-    response.delete_cookie("sb-access-token")
-    response.delete_cookie("sb-refresh-token")
+async def logout(user: Dict[str, Any] = Depends(get_current_user)):
+    # Build response first, then delete cookies on it
+    response = JSONResponse({"msg": "ok"})
+    response.delete_cookie("sb-access-token", path="/")
+    response.delete_cookie("sb-refresh-token", path="/")
     
-    # Ideally we should also sign out from Supabase to invalidate the session on server side
+    # Sign out from Supabase to invalidate the session server-side
     try:
         supabase.auth.sign_out() 
-    except:
-        pass # Ignore errors during sign out
+    except Exception as e:
+        logging.debug(f"Supabase sign_out failed (non-critical): {e}")
         
-    return {"msg": "ok"}
+    return response
 
 @router.post("/google_oauth")
 async def google_oauth():

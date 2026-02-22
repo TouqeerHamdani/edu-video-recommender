@@ -1,60 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-    <link rel="stylesheet" href="project.css">
+    <title>EduTV - Educational Video Recommendations</title>
+    <meta name="description"
+        content="Get personalized educational video recommendations powered by AI. Search any topic and discover the best learning content.">
+    <link rel="stylesheet" href="/static/project.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
-    <header>EduTV <a href="/auth" id="loginBtn" style="float:right; font-size:1rem; color:#007bff; text-decoration:none; margin-right:24px;">Login</a></header>
 
-    <div class="hero"> 
-        <h1>Unlock the Future of Learning</h1>
-        <p>Get personalized educational video recommendations instantly</p>
-        <div class="search-box">
-            <input type="text" id="searchInput" placeholder="Search for topics...">
-            <select id="durationSelect">
-                <option value="any">Any</option>
-                <option value="short">Short (&lt;4 min)</option>
-                <option value="medium" selected>Medium (4–20 min)</option>
-                <option value="long">Long (&gt;20 min)</option>
-            </select>
-            <button id="searchBtn"><i class="fas fa-search"></i></button>
+<body class="home-page">
+    <!-- Navigation -->
+    <nav class="home-nav" id="homeNav">
+        <a href="/" class="nav-brand">
+            <i class="fas fa-graduation-cap"></i> EduTV
+        </a>
+        <div class="nav-links">
+            <span id="authNav">
+                <a href="/auth" id="loginBtn" class="nav-link nav-login">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+                <span id="userInfo" style="display:none;">
+                    <span id="userEmail" class="nav-email"></span>
+                    &nbsp;|&nbsp;
+                    <a href="#" id="logoutBtn" class="nav-link nav-logout">Logout</a>
+                </span>
+            </span>
         </div>
-    </div>
+    </nav>
 
-    <section class="video-section">
-        <div class="video-card">
-            <img src="https://www.befunky.com/images/wp/wp-2019-11-BeFunky-YouTube-Thumbnail-Maker-15.jpg?auto=avif,webp&format=jpg&width=1136&crop=16:9" alt="Video Thumbnail">
-            <div class="info">
-                <h3>Introduction to AI</h3>
-                <p>Duration: 15 mins</p>
+    <!-- Hero Section -->
+    <section class="home-hero">
+        <div class="hero-bg-pattern"></div>
+        <div class="hero-content">
+            <span class="hero-badge"><i class="fas fa-sparkles"></i> AI-Powered Recommendations</span>
+            <h1>Learn Smarter,<br>Not Harder</h1>
+            <p class="hero-subtitle">
+                Discover the best educational videos tailored to your interests.
+                Powered by semantic search and intelligent recommendations.
+            </p>
+
+            <!-- Search -->
+            <div class="home-search">
+                <div class="search-input-wrap">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="What do you want to learn today?"
+                        autocomplete="off">
+                </div>
+                <select id="durationSelect" class="duration-select">
+                    <option value="any">Any Duration</option>
+                    <option value="short">Short (&lt;4 min)</option>
+                    <option value="medium">Medium (4–20 min)</option>
+                    <option value="long">Long (&gt;20 min)</option>
+                </select>
+                <button id="searchBtn" class="search-btn">
+                    <i class="fas fa-arrow-right"></i>
+                </button>
             </div>
-        </div>
 
-        <div class="video-card">
-            <img src="https://cdn.pixabay.com/photo/2017/11/11/11/30/chemistry-2938901_640.jpg" alt="Video Thumbnail">
-            <div class="info">
-                <h3>Class 12 Chemistry: D Block</h3>
-                <p>Duration: 25 mins</p>
-            </div>
-        </div>
-
-        <div class="video-card">
-            <img src="https://s3.us-east-1.amazonaws.com/creator-assets.codedamn.com/harisiftikhar-662205559a7294000893c0e3/COURSE_IMAGE/2024-04-25/91fd68fca32cc462b365c1a71095e1792cef6e55" alt="Video Thumbnail">
-            <div class="info">
-                <h3>Python Programming Basics</h3>
-                <p>Duration: 30 mins</p>
+            <div class="hero-tags">
+                <span class="tag" data-query="machine learning">Machine Learning</span>
+                <span class="tag" data-query="organic chemistry">Organic Chemistry</span>
+                <span class="tag" data-query="calculus">Calculus</span>
+                <span class="tag" data-query="python programming">Python</span>
+                <span class="tag" data-query="data structures">Data Structures</span>
             </div>
         </div>
     </section>
-    <footer>
-        &copy; 2025 EduTV. All rights reserved.
+
+    <!-- Features Section -->
+    <section class="features-section">
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fas fa-brain"></i></div>
+                <h3>Semantic Search</h3>
+                <p>Our AI understands context, not just keywords. Find exactly what you need to learn.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fas fa-clock"></i></div>
+                <h3>Duration Filters</h3>
+                <p>Short on time? Choose quick videos or deep-dive lectures — you control the pace.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
+                <h3>Smart Rankings</h3>
+                <p>Videos ranked by relevance, quality, and engagement so you always get the best.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="home-footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <i class="fas fa-graduation-cap"></i> EduTV
+            </div>
+            <p>&copy; 2026 EduTV. All rights reserved.</p>
+        </div>
     </footer>
 
-
-<script src="project.js"> </script>
+    <script src="/static/project.js"></script>
 </body>
+
 </html>
