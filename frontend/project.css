@@ -2,7 +2,7 @@
    EduTV – Global Styles & Home Page Design
    =============================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Inter font loaded via <link> in HTML <head> for non-blocking parallel download */
 
 * {
     padding: 0;
@@ -16,6 +16,8 @@ body {
     background-color: #0f0f13;
     color: #e4e4e7;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
 
 /* ---- Shared: Header (used by auth.html) ---- */
@@ -33,8 +35,9 @@ header {
     height: 53px;
     display: flex;
     align-items: center;
-    justify-content: left;
+    justify-content: flex-start;
     background-color: rgba(15, 15, 19, 0.95);
+    -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     padding: 15px 30px;
     color: white;
@@ -47,39 +50,24 @@ header {
 .topbar .logo {
     font-size: 1.8rem;
     font-weight: bold;
+    text-decoration: none;
+    color: white;
+}
+
+/* Search-box design tokens – override per context if needed */
+:root {
+    --search-border-radius: 10px;
+    --search-bg: transparent;
+    --search-input-bg: #1a1a24;
+    --search-input-color: #e4e4e7;
+    --search-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    --search-btn-bg: #6c5ce7;
+    --search-btn-hover-bg: #5a4bd1;
 }
 
 .topbar .search-box {
     margin-left: 55px;
     width: 480px;
-    display: flex;
-    border-radius: 7px;
-    overflow: hidden;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-}
-
-.topbar .search-box input {
-    flex: 1;
-    padding: 10px 15px;
-    font-size: 1rem;
-    border: none;
-    outline: none;
-    background: #1a1a24;
-    color: #e4e4e7;
-}
-
-.topbar .search-box button {
-    background-color: #6c5ce7;
-    color: white;
-    border: none;
-    padding: 0 15px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.topbar .search-box button:hover {
-    background-color: #5a4bd1;
 }
 
 /* ---- Shared: Video Grid ---- */
@@ -168,9 +156,9 @@ footer a:hover {
 /* ---- Shared: Search Box base ---- */
 .search-box {
     display: flex;
-    border-radius: 10px;
+    border-radius: var(--search-border-radius);
     overflow: hidden;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--search-shadow);
 }
 
 .search-box input {
@@ -179,12 +167,12 @@ footer a:hover {
     font-size: 1rem;
     border: none;
     outline: none;
-    background: #1a1a24;
-    color: #e4e4e7;
+    background: var(--search-input-bg);
+    color: var(--search-input-color);
 }
 
 .search-box button {
-    background-color: #6c5ce7;
+    background-color: var(--search-btn-bg);
     color: white;
     border: none;
     padding: 0 18px;
@@ -194,7 +182,7 @@ footer a:hover {
 }
 
 .search-box button:hover {
-    background-color: #5a4bd1;
+    background-color: var(--search-btn-hover-bg);
 }
 
 /* ===============================================
@@ -219,6 +207,7 @@ footer a:hover {
 
 .home-nav.scrolled {
     background: rgba(15, 15, 19, 0.92);
+    -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -249,7 +238,12 @@ footer a:hover {
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 500;
+    color: #d4d4d8;
     transition: color 0.2s;
+}
+
+.nav-link:hover {
+    color: #f4f4f5;
 }
 
 .nav-login {
@@ -419,6 +413,7 @@ footer a:hover {
     outline: none;
     appearance: none;
     -webkit-appearance: none;
+    -moz-appearance: none;
     min-width: 130px;
     text-align: center;
 }
@@ -445,6 +440,12 @@ footer a:hover {
     opacity: 0.9;
 }
 
+.search-btn:focus-visible {
+    outline: 2px solid #a5b4fc;
+    outline-offset: 2px;
+    opacity: 1;
+}
+
 /* ---- Quick Topic Tags ---- */
 .hero-tags {
     display: flex;
@@ -467,6 +468,14 @@ footer a:hover {
 }
 
 .tag:hover {
+    background: rgba(129, 140, 248, 0.12);
+    color: #c7d2fe;
+    border-color: rgba(129, 140, 248, 0.25);
+}
+
+.tag:focus-visible {
+    outline: 2px solid #818cf8;
+    outline-offset: 2px;
     background: rgba(129, 140, 248, 0.12);
     color: #c7d2fe;
     border-color: rgba(129, 140, 248, 0.25);
@@ -603,5 +612,24 @@ footer a:hover {
     .video-section {
         padding: 20px;
         gap: 16px;
+    }
+}
+
+/* ---- Reduced Motion ---- */
+@media (prefers-reduced-motion: reduce) {
+    .hero-bg-pattern {
+        animation: none;
+    }
+
+    .hero-content {
+        animation: none;
+    }
+
+    .feature-card {
+        transition: none;
+    }
+
+    .video-card {
+        transition: none;
     }
 }

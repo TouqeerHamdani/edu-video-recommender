@@ -5,7 +5,12 @@
   <meta charset="UTF-8" />
   <title>Watch Video - EduTV</title>
   <link rel="stylesheet" href="/static/project.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+    crossorigin="anonymous" referrerpolicy="no-referrer">
   <style>
     .video-container {
       max-width: 900px;
@@ -63,7 +68,7 @@
 
 <body>
   <div class="topbar">
-    <a href="/" class="logo" style="text-decoration:none; color:white;">EduTV</a>
+    <a href="/" class="logo">EduTV</a>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Search for topics...">
       <button id="searchBtn"><i class="fas fa-search"></i></button>
@@ -113,6 +118,27 @@
 
     // --- Like button ---
     const likeBtn = document.getElementById("likeBtn");
+
+    // Check existing like state on load
+    async function checkLikeState() {
+      if (!videoId) return;
+      try {
+        const res = await fetch(`/api/interactions?video_id=${encodeURIComponent(videoId)}`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.liked) {
+            likeBtn.classList.add('liked');
+            likeBtn.innerHTML = '<i class="fas fa-heart"></i> Liked';
+          }
+        }
+      } catch (e) {
+        // Silently ignore — best effort
+      }
+    }
+    checkLikeState();
+
     likeBtn.addEventListener("click", async () => {
       if (likeBtn.classList.contains('liked')) return;
       if (!videoId) {
@@ -143,6 +169,14 @@
         }
       } catch (err) {
         console.error("Like error:", err);
+        // Revert optimistic UI if it was applied
+        likeBtn.classList.remove('liked');
+        likeBtn.innerHTML = '<i class="fas fa-heart"></i> Like';
+        // Surface failure to user
+        const msg = navigator.onLine === false
+          ? "You appear to be offline. Please check your connection."
+          : `Could not like video: ${err.message}`;
+        alert(msg);
       }
     });
   </script>

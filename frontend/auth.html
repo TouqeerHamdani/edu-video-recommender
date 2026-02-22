@@ -1,26 +1,121 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login / Register - EduTV</title>
     <link rel="stylesheet" href="/static/project.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        .auth-container { max-width: 400px; margin: 60px auto; background: #fff; padding: 32px 28px 24px 28px; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-        .auth-tabs { display: flex; justify-content: space-between; margin-bottom: 24px; }
-        .auth-tab { flex: 1; text-align: center; padding: 10px 0; cursor: pointer; border-bottom: 2px solid #eee; font-weight: 600; color: #888; transition: color 0.2s, border-color 0.2s; }
-        .auth-tab.active { color: #222; border-bottom: 2px solid #007bff; }
-        .auth-form { display: none; }
-        .auth-form.active { display: block; }
-        .auth-form input { width: 100%; padding: 10px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 5px; font-size: 1rem; box-sizing: border-box; }
-        .auth-form button { width: 100%; padding: 10px; background: #007bff; color: #fff; border: none; border-radius: 5px; font-size: 1rem; cursor: pointer; }
-        .auth-form button:hover { background: #0056b3; }
-        .auth-message { margin-bottom: 16px; color: #d9534f; text-align: center; min-height: 24px; }
-        .auth-success { color: #28a745; }
+        .auth-container {
+            max-width: 400px;
+            margin: 60px auto;
+            background: #fff;
+            padding: 32px 28px 24px 28px;
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .auth-tabs {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .auth-tab {
+            flex: 1;
+            text-align: center;
+            padding: 10px 0;
+            cursor: pointer;
+            border-bottom: 2px solid #eee;
+            font-weight: 600;
+            color: #888;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .auth-tab.active {
+            color: #222;
+            border-bottom: 2px solid #007bff;
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        .auth-form input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .auth-form button {
+            width: 100%;
+            padding: 10px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .auth-form button:hover {
+            background: #0056b3;
+        }
+
+        .auth-message {
+            margin-bottom: 16px;
+            color: #d9534f;
+            text-align: center;
+            min-height: 24px;
+        }
+
+        .auth-success {
+            color: #28a745;
+        }
+
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Auth page header with flexbox instead of float */
+        .auth-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .auth-header a {
+            font-size: 1rem;
+            color: #007bff;
+            text-decoration: none;
+            margin-right: 24px;
+        }
     </style>
 </head>
+
 <body>
-    <header>EduTV <a href="/" style="float:right; font-size:1rem; color:#007bff; text-decoration:none; margin-right:24px;">Home</a></header>
+    <header class="auth-header">EduTV <a href="/">Home</a>
+    </header>
     <div class="auth-container">
         <div class="auth-tabs">
             <div class="auth-tab active" id="loginTab">Login</div>
@@ -28,16 +123,22 @@
         </div>
         <div class="auth-message" id="authMessage"></div>
         <form class="auth-form active" id="loginForm">
-            <input type="email" id="loginEmail" placeholder="Email" required>
-            <input type="password" id="loginPassword" placeholder="Password" required>
+            <label for="loginEmail" class="visually-hidden">Email</label>
+            <input type="email" id="loginEmail" placeholder="Email" required autocomplete="email">
+            <label for="loginPassword" class="visually-hidden">Password</label>
+            <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password">
             <button type="submit">Login</button>
         </form>
         <form class="auth-form" id="registerForm">
-            <input type="email" id="registerEmail" placeholder="Email" required>
-            <input type="password" id="registerPassword" placeholder="Password (min 8 chars)" required minlength="8">
+            <label for="registerEmail" class="visually-hidden">Email</label>
+            <input type="email" id="registerEmail" placeholder="Email" required autocomplete="email">
+            <label for="registerPassword" class="visually-hidden">Password</label>
+            <input type="password" id="registerPassword" placeholder="Password (min 8 chars)" required minlength="8"
+                autocomplete="new-password">
             <button type="submit">Register</button>
         </form>
     </div>
     <script src="/static/auth.js"></script>
 </body>
+
 </html>

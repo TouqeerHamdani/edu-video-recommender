@@ -8,7 +8,11 @@
     <meta name="description"
         content="Get personalized educational video recommendations powered by AI. Search any topic and discover the best learning content.">
     <link rel="stylesheet" href="/static/project.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
@@ -46,27 +50,27 @@
             <!-- Search -->
             <div class="home-search">
                 <div class="search-input-wrap">
-                    <i class="fas fa-search search-icon"></i>
+                    <i class="fas fa-search search-icon" aria-hidden="true"></i>
                     <input type="text" id="searchInput" placeholder="What do you want to learn today?"
-                        autocomplete="off">
+                        autocomplete="off" aria-label="Search topics">
                 </div>
-                <select id="durationSelect" class="duration-select">
+                <select id="durationSelect" class="duration-select" aria-label="Filter by video duration">
                     <option value="any">Any Duration</option>
                     <option value="short">Short (&lt;4 min)</option>
                     <option value="medium">Medium (4–20 min)</option>
                     <option value="long">Long (&gt;20 min)</option>
                 </select>
-                <button id="searchBtn" class="search-btn">
-                    <i class="fas fa-arrow-right"></i>
+                <button id="searchBtn" type="button" class="search-btn" aria-label="Execute search">
+                    <i class="fas fa-arrow-right" aria-hidden="true"></i>
                 </button>
             </div>
 
             <div class="hero-tags">
-                <span class="tag" data-query="machine learning">Machine Learning</span>
-                <span class="tag" data-query="organic chemistry">Organic Chemistry</span>
-                <span class="tag" data-query="calculus">Calculus</span>
-                <span class="tag" data-query="python programming">Python</span>
-                <span class="tag" data-query="data structures">Data Structures</span>
+                <button class="tag" data-query="machine learning" type="button">Machine Learning</button>
+                <button class="tag" data-query="organic chemistry" type="button">Organic Chemistry</button>
+                <button class="tag" data-query="calculus" type="button">Calculus</button>
+                <button class="tag" data-query="python programming" type="button">Python</button>
+                <button class="tag" data-query="data structures" type="button">Data Structures</button>
             </div>
         </div>
     </section>
