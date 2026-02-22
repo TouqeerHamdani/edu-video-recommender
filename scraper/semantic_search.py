@@ -51,6 +51,42 @@ def create_query_embedding(query):
         return None
 
 
+def create_query_embeddings(queries):
+    """
+    Batch-embed multiple queries in a single Cloudflare API call.
+    Falls back to per-query calls on batch failure.
+    Returns a list of numpy arrays (None entries filtered out).
+    """
+    if not queries:
+        return []
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        logging.warning("Cloudflare credentials not set. Vector search disabled.")
+        return []
+
+    try:
+        response = requests.post(
+            CLOUDFLARE_BGE_URL,
+            headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
+            json={"text": queries},
+            timeout=30
+        )
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("success") and result.get("result", {}).get("data"):
+                data = result["result"]["data"]
+                return [np.array(emb, dtype=np.float32) for emb in data if emb]
+    except Exception as e:
+        logging.warning(f"Batch embedding failed, falling back to per-query: {e}")
+
+    # Fallback: per-query calls
+    embeddings = []
+    for q in queries:
+        emb = create_query_embedding(q)
+        if emb is not None:
+            embeddings.append(emb)
+    return embeddings
+
+
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
@@ -84,6 +120,57 @@ def _get_local_session():
     gen = get_session()
     session = next(gen)
     return session, gen
+
+
+def _escape_like(query):
+    """Escape SQL LIKE/ILIKE wildcard characters in user input."""
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _execute_text_search(session, query, duration_filter_sql, limit):
+    """Run a text-based ILIKE search and return the raw result rows."""
+    sql = f"""
+    SELECT
+        youtube_id,
+        title,
+        description,
+        thumbnail,
+        duration,
+        view_count,
+        like_count,
+        0.0 as similarity_score
+    FROM videos
+    WHERE (title ILIKE :query ESCAPE '\\' OR description ILIKE :query ESCAPE '\\')
+    {duration_filter_sql}
+    ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
+    LIMIT :limit
+    """
+    return session.execute(
+        text(sql),
+        {"query": f"%{_escape_like(query)}%", "limit": limit}
+    )
+
+
+def _process_text_rows(rows, seen_ids, videos):
+    """Map raw text-search result rows to video dicts. Mutates seen_ids and videos in-place."""
+    for row in rows:
+        youtube_id, title, description, thumbnail, duration, view_count, like_count, _similarity = row
+        if youtube_id in seen_ids:
+            continue
+        view_count = view_count or 0
+        like_count = like_count or 0
+        videos.append({
+            "video_id": youtube_id,
+            "title": title,
+            "description": description,
+            "thumbnail": thumbnail,
+            "channel": "YouTube",
+            "link": f"https://www.youtube.com/watch?v={youtube_id}",
+            "score": float(view_count + 2 * like_count) / 100000,
+            "views": view_count,
+            "likes": like_count
+        })
+        seen_ids.add(youtube_id)
 
 def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_session=None):
     session = None
@@ -171,95 +258,18 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
             )
         else:
             print("Using Text Search (Fallback - ILIKE)")
-            # Phase 1 Fallback: Use text search
-            sql = f"""
-            SELECT
-                youtube_id,
-                title,
-                description,
-                thumbnail,
-                duration,
-                view_count,
-                like_count,
-                0.0 as similarity_score
-            FROM videos
-            WHERE (title ILIKE :query OR description ILIKE :query)
-            {duration_filter_sql}
-            ORDER BY view_count DESC, like_count DESC
-            LIMIT :limit
-            """
-
-            result = session.execute(
-                text(sql),
-                {
-                    "query": f"%{query}%",
-                    "limit": top_n
-                }
-            )
+            result = _execute_text_search(session, query, duration_filter_sql, top_n)
 
         videos = []
         seen_ids = set()
 
-        for row in result:
-            # Unpack 8 columns
-            youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
-
-            if youtube_id in seen_ids:
-                continue
-
-            # Calculate final score
-            # If vector search, use similarity. If text search, use popularity.
-            if query_vector is not None:
-                final_score = float(similarity) if similarity is not None else 0.0
-            else:
-                 # Popularity score
-                 view_count = view_count or 0
-                 like_count = like_count or 0
-                 final_score = float(view_count + 2 * like_count) / 100000
-
-            videos.append({
-                "video_id": youtube_id,
-                "title": title,
-                "description": description,
-                "thumbnail": thumbnail,
-                "channel": "YouTube",
-                "link": f"https://www.youtube.com/watch?v={youtube_id}",
-                "score": final_score,
-                "views": view_count,
-                "likes": like_count
-            })
-            seen_ids.add(youtube_id)
-
-        # Fallback: if vector search returned 0 results (e.g. new videos without embeddings),
-        # retry with text search so freshly fetched YouTube videos still appear
-        if not videos and query_vector is not None:
-            print("⚠️ Vector search returned 0 results, falling back to text search...")
-            fallback_sql = f"""
-            SELECT
-                youtube_id,
-                title,
-                description,
-                thumbnail,
-                duration,
-                view_count,
-                like_count,
-                0.0 as similarity_score
-            FROM videos
-            WHERE (title ILIKE :query OR description ILIKE :query)
-            {duration_filter_sql}
-            ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
-            LIMIT :limit
-            """
-            fallback_result = session.execute(
-                text(fallback_sql),
-                {"query": f"%{query}%", "limit": top_n}
-            )
-            for row in fallback_result:
+        if query_vector is not None:
+            # Vector search: use similarity score
+            for row in result:
                 youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
                 if youtube_id in seen_ids:
                     continue
-                view_count = view_count or 0
-                like_count = like_count or 0
+                final_score = float(similarity) if similarity is not None else 0.0
                 videos.append({
                     "video_id": youtube_id,
                     "title": title,
@@ -267,11 +277,21 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
                     "thumbnail": thumbnail,
                     "channel": "YouTube",
                     "link": f"https://www.youtube.com/watch?v={youtube_id}",
-                    "score": float(view_count + 2 * like_count) / 100000,
+                    "score": final_score,
                     "views": view_count,
                     "likes": like_count
                 })
                 seen_ids.add(youtube_id)
+        else:
+            # Text search: use popularity score
+            _process_text_rows(result, seen_ids, videos)
+
+        # Fallback: if vector search returned 0 results (e.g. new videos without embeddings),
+        # retry with text search so freshly fetched YouTube videos still appear
+        if not videos and query_vector is not None:
+            print("⚠️ Vector search returned 0 results, falling back to text search...")
+            fallback_result = _execute_text_search(session, query, duration_filter_sql, top_n)
+            _process_text_rows(fallback_result, seen_ids, videos)
 
         # Only close if we created it
         if session_gen:
@@ -357,11 +377,7 @@ def get_user_profile(user_id, db_session=None):
         if not queries:
             return None
 
-        embeddings = []
-        for q in queries:
-            emb = create_query_embedding(q)
-            if emb is not None:
-                embeddings.append(emb)
+        embeddings = create_query_embeddings(queries)
         if not embeddings:
             return None
 
@@ -382,8 +398,10 @@ def check_query_in_db(query, video_duration="any", db_session=None):
         session, session_gen = _get_local_session()
 
     try:
-        # Base text filter
-        text_filter = Video.title.ilike(f"%{query}%") | Video.description.ilike(f"%{query}%")
+        # Base text filter (escape SQL wildcards in user input)
+        escaped = _escape_like(query)
+        pattern = f"%{escaped}%"
+        text_filter = Video.title.ilike(pattern, escape='\\') | Video.description.ilike(pattern, escape='\\')
         q = session.query(Video).filter(text_filter)
 
         # Apply duration filter if specified
