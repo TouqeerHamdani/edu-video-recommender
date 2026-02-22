@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 load_dotenv()
 
@@ -117,7 +118,10 @@ async def get_current_user_id(request: Request) -> str:
 
 def _serve_frontend_file(filename: str):
     """Return a FileResponse for a frontend file, or raise 404 if missing."""
-    file_path = frontend_dir / filename
+    file_path = (frontend_dir / filename).resolve()
+    # Prevent path traversal — resolved path must stay inside frontend_dir
+    if not file_path.is_relative_to(frontend_dir.resolve()):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{filename} not found")
     if not frontend_dir.is_dir() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{filename} not found")
     return FileResponse(str(file_path))
@@ -184,7 +188,7 @@ async def get_recommendations(
     query: str,
     duration: str = "any",
     current_user: str = Depends(get_current_user_id),
-    db: object = Depends(get_db)  # Injected session
+    db: Session = Depends(get_db)  # Injected session
 ):
     """
     Get video recommendations.
