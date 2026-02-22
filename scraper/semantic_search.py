@@ -172,7 +172,7 @@ def _process_text_rows(rows, seen_ids, videos):
         })
         seen_ids.add(youtube_id)
 
-def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_session=None):
+def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=None):
     session = None
     session_gen = None
     
@@ -186,32 +186,8 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
         
-        # === STEP 1: Check if we have enough videos in DB ===
+        # === STEP 1: Build duration filter + generate query embedding ===
         from scraper.youtube_scraper import fetch_and_store_videos
-        
-        # Count matching videos in database (with duration filter)
-        db_videos = check_query_in_db(query, video_duration=video_duration, db_session=session)
-        db_count = len(db_videos) if db_videos else 0
-        print(f"📊 Found {db_count} matching videos in database (duration: {video_duration})")
-        
-        # === STEP 2: If not enough, fetch from YouTube API ===
-        if db_count < top_n:
-            print(f"⚠️ Not enough videos in DB ({db_count} < {top_n}), fetching from YouTube...")
-            try:
-                inserted = fetch_and_store_videos(
-                    query, 
-                    max_results=20, 
-                    video_duration=video_duration,
-                    db_session=session
-                )
-                if inserted > 0:
-                    session.commit()  # Commit newly inserted videos
-                    print(f"✅ Added {inserted} new videos from YouTube")
-            except Exception as yt_error:
-                print(f"⚠️ YouTube fetch failed: {yt_error}")
-                # Continue with whatever we have in DB
-        
-        # === STEP 3: Search and recommend from database ===
 
         # Build duration filter
         duration_filter_sql = ""
@@ -222,8 +198,58 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
         elif video_duration == "long":
             duration_filter_sql = "AND duration >= 1200"  # >= 20 minutes
 
-        # Attempt to get query embedding
-        query_vector = create_query_embedding(query)
+        # Check globally if ANY video in the DB has an embedding
+        has_any_embeddings = session.query(Video).filter(
+            Video.embedding.isnot(None)
+        ).limit(1).first() is not None
+
+        query_vector = None
+        embedding_list = None
+        if has_any_embeddings:
+            query_vector = create_query_embedding(query)
+            if query_vector is not None:
+                embedding_list = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
+        else:
+            print("⏭️ Skipping embedding — no embedded videos exist in DB")
+
+        # === STEP 2: Smart supply check — decide if YouTube fetch is needed ===
+        if query_vector is not None:
+            # Use vector similarity count: how many DB videos are semantically close?
+            count_sql = f"""
+                SELECT COUNT(*) FROM videos
+                WHERE embedding IS NOT NULL
+                AND 1 - (embedding <=> :qe) > 0.6
+                {duration_filter_sql}
+            """
+            semantic_count = session.execute(
+                text(count_sql), {"qe": str(embedding_list)}
+            ).scalar() or 0
+            print(f"📊 Found {semantic_count} semantically relevant videos in DB (similarity > 0.6)")
+            needs_youtube = semantic_count < top_n
+        else:
+            # Fallback: ILIKE text match count
+            db_videos, _ = check_query_in_db(query, video_duration=video_duration, db_session=session)
+            db_count = len(db_videos) if db_videos else 0
+            print(f"📊 Found {db_count} keyword-matching videos in DB (duration: {video_duration})")
+            needs_youtube = db_count < top_n
+
+        # === STEP 3: Fetch from YouTube if not enough ===
+        if needs_youtube:
+            print(f"⚠️ Not enough relevant videos in DB, fetching from YouTube...")
+            try:
+                inserted = fetch_and_store_videos(
+                    query,
+                    max_results=20,
+                    video_duration=video_duration,
+                    db_session=session
+                )
+                if inserted > 0:
+                    session.commit()
+                    print(f"✅ Added {inserted} new videos from YouTube")
+            except Exception as yt_error:
+                print(f"⚠️ YouTube fetch failed: {yt_error}")
+
+        # === STEP 4: Search and recommend from database ===
         
         if query_vector is not None:
             print("Using Vector Search (pgvector)")
@@ -246,8 +272,6 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
             LIMIT :limit
             """
             
-            # Convert numpy array to list for SQLAlchemy
-            embedding_list = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
             
             result = session.execute(
                 text(sql),
@@ -292,6 +316,17 @@ def recommend(query, top_n=5, user_id="guest", video_duration="medium", db_sessi
             print("⚠️ Vector search returned 0 results, falling back to text search...")
             fallback_result = _execute_text_search(session, query, duration_filter_sql, top_n)
             _process_text_rows(fallback_result, seen_ids, videos)
+
+        # Blend quality signals into vector search scores:
+        # 70% semantic relevance + 30% normalized popularity (views + likes)
+        if videos and query_vector is not None:
+            max_views = max((v["views"] or 1) for v in videos)
+            max_likes = max((v["likes"] or 1) for v in videos)
+            for v in videos:
+                views_norm = (v["views"] or 0) / max_views
+                likes_norm = (v["likes"] or 0) / max_likes
+                popularity = 0.5 * views_norm + 0.5 * likes_norm
+                v["score"] = 0.7 * v["score"] + 0.3 * popularity
 
         # Only close if we created it
         if session_gen:
@@ -411,7 +446,10 @@ def check_query_in_db(query, video_duration="any", db_session=None):
 
         videos = q.limit(20).all()
 
-        return [
+        # Check if any of the matched videos have embeddings
+        has_embeddings = any(v.embedding is not None for v in videos)
+
+        video_list = [
             {
                 'video_id': v.youtube_id,
                 'title': v.title,
@@ -422,6 +460,7 @@ def check_query_in_db(query, video_duration="any", db_session=None):
             }
             for v in videos
         ]
+        return video_list, has_embeddings
     finally:
         if session_gen:
             session_gen.close()
