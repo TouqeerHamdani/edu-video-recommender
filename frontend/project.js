@@ -51,16 +51,18 @@ updateNav();
 const searchBtn = document.getElementById("searchBtn");
 if (searchBtn) {
   searchBtn.addEventListener("click", () => {
-    const query = document.getElementById("searchInput").value.trim();
+    const searchInputEl = document.getElementById("searchInput");
+    if (!searchInputEl) return;
+    const query = searchInputEl.value.trim();
     const durationSelect = document.getElementById("durationSelect");
-    const duration = durationSelect ? durationSelect.value : "medium";
+    const duration = durationSelect ? durationSelect.value : "any";
 
     if (!query) {
       alert("Please enter a search query.");
       return;
     }
 
-    window.location.href = `/results?query=${encodeURIComponent(query)}&duration=${duration}`;
+    window.location.href = `/results?query=${encodeURIComponent(query)}&duration=${encodeURIComponent(duration)}`;
   });
 }
 
@@ -73,3 +75,21 @@ if (searchInput) {
     }
   });
 }
+
+// --- Home page: Nav scroll effect ---
+const homeNav = document.getElementById("homeNav");
+if (homeNav) {
+  window.addEventListener("scroll", () => {
+    homeNav.classList.toggle("scrolled", window.scrollY > 40);
+  });
+}
+
+// --- Home page: Quick topic tags ---
+document.querySelectorAll(".tag[data-query]").forEach(tag => {
+  tag.addEventListener("click", () => {
+    const query = tag.getAttribute("data-query");
+    const input = document.getElementById("searchInput");
+    if (input) input.value = query;
+    if (searchBtn) searchBtn.click();
+  });
+});
