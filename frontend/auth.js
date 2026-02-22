@@ -23,6 +23,24 @@ registerTab.addEventListener('click', () => {
     authMessage.textContent = '';
 });
 
+/**
+ * Safely parse a JSON response body.
+ * Falls back to raw text if the body isn't valid JSON.
+ */
+async function parseResponseBody(res) {
+    const text = await res.text();
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { _raw: text };
+    }
+}
+
+/** Extract user-facing error message from a parsed response body. */
+function getErrorMessage(data, fallback) {
+    return data.detail || data.error || data._raw || fallback;
+}
+
 // --- Login ---
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -39,14 +57,14 @@ loginForm.addEventListener('submit', async (e) => {
             credentials: 'include',
             body: JSON.stringify({ email, password })
         });
-        const data = await res.json();
+        const data = await parseResponseBody(res);
 
         if (res.ok) {
             authMessage.textContent = 'Login successful! Redirecting...';
             authMessage.classList.add('auth-success');
             setTimeout(() => { window.location.href = '/'; }, 1000);
         } else {
-            authMessage.textContent = data.detail || data.error || 'Login failed.';
+            authMessage.textContent = getErrorMessage(data, 'Login failed.');
         }
     } catch (err) {
         authMessage.textContent = 'Network error. Please try again.';
@@ -69,14 +87,14 @@ registerForm.addEventListener('submit', async (e) => {
             credentials: 'include',
             body: JSON.stringify({ email, password })
         });
-        const data = await res.json();
+        const data = await parseResponseBody(res);
 
         if (res.ok) {
             authMessage.textContent = 'Registration successful! You can now log in.';
             authMessage.classList.add('auth-success');
             setTimeout(() => { loginTab.click(); }, 1500);
         } else {
-            authMessage.textContent = data.detail || data.error || 'Registration failed.';
+            authMessage.textContent = getErrorMessage(data, 'Registration failed.');
         }
     } catch (err) {
         authMessage.textContent = 'Network error. Please try again.';

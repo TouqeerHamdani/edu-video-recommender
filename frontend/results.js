@@ -29,6 +29,10 @@
   const query = getQueryParam("query");
   const duration = getQueryParam("duration") || "any";
   const resultsSection = document.getElementById("results");
+  if (!resultsSection) {
+    console.warn("Results section element not found");
+    return;
+  }
 
   // Populate search input with current query
   const searchInput = document.getElementById("searchInput");
@@ -66,14 +70,14 @@
           const videoId = video.video_id || extractYouTubeId(video.link) || "";
           const card = document.createElement("a");
           card.className = "video-card";
-          card.href = `/video?videoId=${videoId}&title=${encodeURIComponent(video.title)}&channel=${encodeURIComponent(video.channel)}`;
+          card.href = `/video?videoId=${encodeURIComponent(videoId)}&title=${encodeURIComponent(video.title)}&channel=${encodeURIComponent(video.channel)}`;
           card.style.textDecoration = "none";
 
           // Build card content safely (no innerHTML) to prevent XSS
           const img = document.createElement("img");
           img.src = video.thumbnail || '';
           img.alt = "Thumbnail";
-          img.onerror = function () { this.src = 'https://via.placeholder.com/480x360?text=No+Thumbnail'; };
+          img.onerror = function () { this.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" fill="%2313131b"><rect width="480" height="360"/><text x="240" y="180" text-anchor="middle" dominant-baseline="central" fill="%2352525b" font-family="sans-serif" font-size="16">No Thumbnail</text></svg>'); };
           card.appendChild(img);
 
           const info = document.createElement("div");
