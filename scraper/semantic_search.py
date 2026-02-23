@@ -151,7 +151,7 @@ def _execute_text_search(session, query, duration_filter_sql, limit):
     )
 
 
-def _process_text_rows(rows, seen_ids, videos):
+def _process_text_rows(rows, seen_ids, videos, base_score=None):
     """Map raw text-search result rows to video dicts. Mutates seen_ids and videos in-place."""
     for row in rows:
         youtube_id, title, description, thumbnail, duration, view_count, like_count, _similarity = row
@@ -159,6 +159,13 @@ def _process_text_rows(rows, seen_ids, videos):
             continue
         view_count = view_count or 0
         like_count = like_count or 0
+        
+        # If no base_score provided, use the old popularity-only logic
+        if base_score is not None:
+            score = base_score
+        else:
+            score = float(view_count + 2 * like_count) / 100000
+            
         videos.append({
             "video_id": youtube_id,
             "title": title,
@@ -166,7 +173,7 @@ def _process_text_rows(rows, seen_ids, videos):
             "thumbnail": thumbnail,
             "channel": "YouTube",
             "link": f"https://www.youtube.com/watch?v={youtube_id}",
-            "score": float(view_count + 2 * like_count) / 100000,
+            "score": score,
             "views": view_count,
             "likes": like_count
         })
@@ -251,10 +258,20 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
 
         # === STEP 4: Search and recommend from database ===
         
-        if query_vector is not None:
-            print("Using Vector Search (pgvector)")
-            # Use pgvector cosine distance operator <=>
-            # Order by distance (ASC) because lower distance = higher similarity
+        # === STEP 4: Search and recommend from database ===
+        videos = []
+        seen_ids = set()
+
+        # If a fresh fetch was triggered, we PRIORITIZE text results (ILIKE)
+        # because the newly inserted videos don't have embeddings yet.
+        if needs_youtube:
+            print("🚀 Fresh Fetch Priority: Retrieving keyword-matched videos first...")
+            text_result = _execute_text_search(session, query, duration_filter_sql, top_n)
+            _process_text_rows(text_result, seen_ids, videos, base_score=0.7)
+
+        # Then, if we still need more videos, perform Vector Search (pgvector)
+        if query_vector is not None and len(videos) < top_n:
+            print(f"Using Vector Search (pgvector) for remaining {top_n - len(videos)} slots")
             sql = f"""
             SELECT
                 youtube_id,
@@ -267,28 +284,20 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
                 1 - (embedding <=> :query_embedding) as similarity_score
             FROM videos
             WHERE embedding IS NOT NULL
+            AND 1 - (embedding <=> :query_embedding) > 0.5
             {duration_filter_sql}
             ORDER BY embedding <=> :query_embedding ASC
             LIMIT :limit
             """
             
-            
             result = session.execute(
                 text(sql),
                 {
-                    "query_embedding": str(embedding_list), # pgvector expects string representation or array
-                    "limit": top_n
+                    "query_embedding": str(embedding_list),
+                    "limit": top_n - len(videos)
                 }
             )
-        else:
-            print("Using Text Search (Fallback - ILIKE)")
-            result = _execute_text_search(session, query, duration_filter_sql, top_n)
 
-        videos = []
-        seen_ids = set()
-
-        if query_vector is not None:
-            # Vector search: use similarity score
             for row in result:
                 youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
                 if youtube_id in seen_ids:
@@ -306,16 +315,18 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
                     "likes": like_count
                 })
                 seen_ids.add(youtube_id)
-        else:
-            # Text search: use popularity score
-            _process_text_rows(result, seen_ids, videos)
 
-        # Fallback: if vector search returned 0 results (e.g. new videos without embeddings),
-        # retry with text search so freshly fetched YouTube videos still appear
-        if not videos and query_vector is not None:
-            print("⚠️ Vector search returned 0 results, falling back to text search...")
+        # Fallback: if we still don't have enough, or if query_vector was skipped
+        if len(videos) < top_n:
+            if query_vector is None:
+                print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
+            else:
+                print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
+            
             fallback_result = _execute_text_search(session, query, duration_filter_sql, top_n)
-            _process_text_rows(fallback_result, seen_ids, videos)
+            # Use 0.7 base score if we have a vector goal, else use popularity ranking
+            text_base = 0.7 if query_vector is not None else None
+            _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
 
         # Blend quality signals into vector search scores:
         # 70% semantic relevance + 30% normalized popularity (views + likes)

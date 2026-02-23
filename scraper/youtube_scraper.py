@@ -10,7 +10,7 @@ from backend.models import Video
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-def fetch_videos(query, max_results=10, video_duration="medium", video_category_id="27"):
+def fetch_videos(query, max_results=10, video_duration="any", video_category_id="27"):
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         'part': 'snippet',
@@ -97,7 +97,7 @@ def is_educational_video(video):
     return category_id == '27'
 
 
-def fetch_and_store_videos(query, max_results=20, video_duration="medium", db_session=None):
+def fetch_and_store_videos(query, max_results=20, video_duration="any", db_session=None):
     """
     Fetch videos from YouTube API, filter out Shorts and non-educational,
     then store valid videos in the database.
