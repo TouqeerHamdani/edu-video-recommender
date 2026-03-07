@@ -233,26 +233,29 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
         else:
             print("⏭️ Skipping embedding — no embedded videos exist in DB")
 
-        # === STEP 2: Smart supply check — decide if YouTube fetch is needed ===
+        # === STEP 2: Supply check — LIMIT probe instead of COUNT (report §4.1) ===
+        _initial_text_rows = None  # cached FTS rows for reuse in Step 4 (no-embedding path only)
         if query_vector is not None:
-            # Use vector similarity count: how many DB videos are semantically close?
-            count_sql = f"""
-                SELECT COUNT(*) FROM videos
+            # SELECT 1 ... LIMIT top_n stops at top_n rows — far cheaper than COUNT(*)
+            supply_sql = f"""
+                SELECT 1 FROM videos
                 WHERE embedding IS NOT NULL
                 AND 1 - (embedding <=> :qe) > 0.6
                 {duration_filter_sql}
+                LIMIT :limit
             """
-            semantic_count = (await session.execute(
-                text(count_sql), {"qe": str(embedding_list)}
-            )).scalar() or 0
-            print(f"📊 Found {semantic_count} semantically relevant videos in DB (similarity > 0.6)")
-            needs_youtube = semantic_count < top_n
+            supply_rows = (await session.execute(
+                text(supply_sql), {"qe": str(embedding_list), "limit": top_n}
+            )).fetchall()
+            print(f"📊 Found {len(supply_rows)} semantically relevant videos in DB (similarity > 0.6)")
+            needs_youtube = len(supply_rows) < top_n
         else:
-            # Fallback: ILIKE text match count
-            db_videos, _ = await check_query_in_db(query, video_duration=video_duration, db_session=session)
-            db_count = len(db_videos) if db_videos else 0
-            print(f"📊 Found {db_count} keyword-matching videos in DB (duration: {video_duration})")
-            needs_youtube = db_count < top_n
+            # Run FTS once and cache rows — reused in Step 4 fallback if no YouTube fetch needed
+            _initial_text_rows = (await _execute_text_search(
+                session, query, duration_filter_sql, top_n
+            )).fetchall()
+            print(f"📊 Found {len(_initial_text_rows)} keyword-matching videos in DB (duration: {video_duration})")
+            needs_youtube = len(_initial_text_rows) < top_n
 
         # === STEP 3: Fetch from YouTube if not enough ===
         if needs_youtube:
@@ -331,15 +334,18 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
 
         # Fallback: if we still don't have enough, or if query_vector was skipped
         if len(videos) < top_n:
-            if query_vector is None:
-                print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
-            else:
-                print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
-            
-            fallback_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
-            # Use 0.7 base score if we have a vector goal, else use popularity ranking
             text_base = 0.7 if query_vector is not None else None
-            _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
+            # Reuse cached FTS rows when no YouTube fetch occurred — avoids a duplicate query (report §4.1)
+            if _initial_text_rows is not None and not needs_youtube:
+                print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
+                _process_text_rows(_initial_text_rows, seen_ids, videos, base_score=text_base)
+            else:
+                if query_vector is None:
+                    print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
+                else:
+                    print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
+                fallback_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
+                _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
 
         # Blend quality signals into vector search scores:
         # 70% semantic relevance + 30% normalized popularity (views + likes)
