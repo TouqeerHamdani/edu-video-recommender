@@ -63,7 +63,7 @@ def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
             upload_date=video['snippet'].get('publishedAt', ''),
             view_count=int(video['statistics'].get('viewCount', 0)),
             like_count=int(video['statistics'].get('likeCount', 0)),
-            embedding=None  # Disabled for Phase 1
+            embedding=None  
         )
         session.add(video_record)
         if owns_session:

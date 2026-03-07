@@ -8,7 +8,7 @@ SQLAlchemy ORM models for the Edu Video Recommender.
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -50,6 +50,16 @@ class Video(Base):
     
     def __repr__(self):
         return f"<Video(id={self.id}, youtube_id={self.youtube_id}, title={self.title[:50]}...)>"
+
+# HNSW index for approximate nearest-neighbour vector search (cosine distance).
+# Replaces the O(N) full scan pgvector does without an index.
+Index(
+    'ix_video_embedding_hnsw',
+    Video.embedding,
+    postgresql_using='hnsw',
+    postgresql_with={'m': 16, 'ef_construction': 64},
+    postgresql_ops={'embedding': 'vector_cosine_ops'},
+)
 
 
 class UserSearch(Base):

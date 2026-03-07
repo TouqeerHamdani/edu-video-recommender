@@ -26,7 +26,7 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,  # Set to True for SQL query logging
     pool_pre_ping=True,  # Verify connections before using them
-    pool_size=10,
+    pool_size=20,   # raised to 20 — total (20+20=40) matches FastAPI's default threadpool (report §3.4)
     max_overflow=20,
 )
 

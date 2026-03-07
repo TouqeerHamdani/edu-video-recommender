@@ -9,6 +9,22 @@ from sqlalchemy import text
 from backend.database import get_session
 from backend.models import UserSearch, Video
 
+# Cached after the first request — avoids a per-request DB round-trip (report §3.3)
+_has_embeddings_cache = None
+
+
+def _check_has_embeddings(session) -> bool:
+    """Return True if any video with an embedding exists. Result is cached permanently."""
+    global _has_embeddings_cache
+    if _has_embeddings_cache is None:
+        _has_embeddings_cache = (
+            session.query(Video)
+            .filter(Video.embedding.isnot(None))
+            .limit(1)
+            .first() is not None
+        )
+    return _has_embeddings_cache
+
 # Cloudflare Workers AI configuration
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
@@ -128,7 +144,11 @@ def _escape_like(query):
 
 
 def _execute_text_search(session, query, duration_filter_sql, limit):
-    """Run a text-based ILIKE search and return the raw result rows."""
+    """Run a full-text search using the GIN tsvector index (report §3.1).
+
+    Uses websearch_to_tsquery which handles multi-word phrases and quoted
+    strings without needing manual query escaping.
+    """
     sql = f"""
     SELECT
         youtube_id,
@@ -140,14 +160,15 @@ def _execute_text_search(session, query, duration_filter_sql, limit):
         like_count,
         0.0 as similarity_score
     FROM videos
-    WHERE (title ILIKE :query ESCAPE '\\' OR description ILIKE :query ESCAPE '\\')
+    WHERE to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
+          @@ websearch_to_tsquery('english', :query)
     {duration_filter_sql}
     ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
     LIMIT :limit
     """
     return session.execute(
         text(sql),
-        {"query": f"%{_escape_like(query)}%", "limit": limit}
+        {"query": query, "limit": limit}
     )
 
 
@@ -205,10 +226,8 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
         elif video_duration == "long":
             duration_filter_sql = "AND duration >= 1200"  # >= 20 minutes
 
-        # Check globally if ANY video in the DB has an embedding
-        has_any_embeddings = session.query(Video).filter(
-            Video.embedding.isnot(None)
-        ).limit(1).first() is not None
+        # Cached after first request — no DB round-trip on subsequent calls (report §3.3)
+        has_any_embeddings = _check_has_embeddings(session)
 
         query_vector = None
         embedding_list = None
@@ -258,7 +277,6 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
 
         # === STEP 4: Search and recommend from database ===
         
-        # === STEP 4: Search and recommend from database ===
         videos = []
         seen_ids = set()
 
