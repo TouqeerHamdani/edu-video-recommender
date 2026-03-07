@@ -2,27 +2,25 @@ import time
 import os
 import logging
 
-import requests
+import httpx
 import numpy as np
 from sqlalchemy import text
 
-from backend.database import get_session
 from backend.models import UserSearch, Video
 
 # Cached after the first request — avoids a per-request DB round-trip (report §3.3)
 _has_embeddings_cache = None
 
 
-def _check_has_embeddings(session) -> bool:
+async def _check_has_embeddings(session) -> bool:
     """Return True if any video with an embedding exists. Result is cached permanently."""
     global _has_embeddings_cache
     if _has_embeddings_cache is None:
-        _has_embeddings_cache = (
-            session.query(Video)
-            .filter(Video.embedding.isnot(None))
-            .limit(1)
-            .first() is not None
+        from sqlalchemy import select
+        result = await session.execute(
+            select(Video).filter(Video.embedding.isnot(None)).limit(1)
         )
+        _has_embeddings_cache = result.scalars().first() is not None
     return _has_embeddings_cache
 
 # Cloudflare Workers AI configuration
@@ -31,7 +29,7 @@ CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_BGE_URL = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/baai/bge-small-en-v1.5"
 
 
-def create_query_embedding(query):
+async def create_query_embedding(query):
     """
     Create query embedding using Cloudflare Workers AI bge-small-en-v1.5.
     Returns 384-dimensional embedding for vector search.
@@ -41,12 +39,12 @@ def create_query_embedding(query):
         return None
     
     try:
-        response = requests.post(
-            CLOUDFLARE_BGE_URL,
-            headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
-            json={"text": query},
-            timeout=10
-        )
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                CLOUDFLARE_BGE_URL,
+                headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
+                json={"text": query},
+            )
         
         if response.status_code != 200:
             logging.error(f"Cloudflare API error: {response.status_code} - {response.text}")
@@ -67,7 +65,7 @@ def create_query_embedding(query):
         return None
 
 
-def create_query_embeddings(queries):
+async def create_query_embeddings(queries):
     """
     Batch-embed multiple queries in a single Cloudflare API call.
     Falls back to per-query calls on batch failure.
@@ -80,12 +78,12 @@ def create_query_embeddings(queries):
         return []
 
     try:
-        response = requests.post(
-            CLOUDFLARE_BGE_URL,
-            headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
-            json={"text": queries},
-            timeout=30
-        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                CLOUDFLARE_BGE_URL,
+                headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
+                json={"text": queries},
+            )
         if response.status_code == 200:
             result = response.json()
             if result.get("success") and result.get("result", {}).get("data"):
@@ -97,7 +95,7 @@ def create_query_embeddings(queries):
     # Fallback: per-query calls
     embeddings = []
     for q in queries:
-        emb = create_query_embedding(q)
+        emb = await create_query_embedding(q)
         if emb is not None:
             embeddings.append(emb)
     return embeddings
@@ -131,11 +129,10 @@ def _build_duration_orm_filter(video_duration):
     return None  # "any" or unrecognized — no filter
 
 
-def _get_local_session():
-    """Helper to get a session from the generator manually."""
-    gen = get_session()
-    session = next(gen)
-    return session, gen
+def _get_local_async_session():
+    """Return a new AsyncSession for non-web contexts (eval scripts, standalone use)."""
+    from backend.database import AsyncSessionLocal
+    return AsyncSessionLocal()
 
 
 def _escape_like(query):
@@ -143,7 +140,7 @@ def _escape_like(query):
     return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _execute_text_search(session, query, duration_filter_sql, limit):
+async def _execute_text_search(session, query, duration_filter_sql, limit):
     """Run a full-text search using the GIN tsvector index (report §3.1).
 
     Uses websearch_to_tsquery which handles multi-word phrases and quoted
@@ -166,7 +163,7 @@ def _execute_text_search(session, query, duration_filter_sql, limit):
     ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
     LIMIT :limit
     """
-    return session.execute(
+    return await session.execute(
         text(sql),
         {"query": query, "limit": limit}
     )
@@ -200,15 +197,13 @@ def _process_text_rows(rows, seen_ids, videos, base_score=None):
         })
         seen_ids.add(youtube_id)
 
-def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=None):
-    session = None
-    session_gen = None
-    
-    # Use provided session or create a new one
+async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=None):
+    own_session = False
     if db_session:
         session = db_session
     else:
-        session, session_gen = _get_local_session()
+        session = _get_local_async_session()
+        own_session = True
 
     try:
         print(f"Searching for: '{query}' (duration: {video_duration})")
@@ -227,12 +222,12 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
             duration_filter_sql = "AND duration >= 1200"  # >= 20 minutes
 
         # Cached after first request — no DB round-trip on subsequent calls (report §3.3)
-        has_any_embeddings = _check_has_embeddings(session)
+        has_any_embeddings = await _check_has_embeddings(session)
 
         query_vector = None
         embedding_list = None
         if has_any_embeddings:
-            query_vector = create_query_embedding(query)
+            query_vector = await create_query_embedding(query)
             if query_vector is not None:
                 embedding_list = query_vector.tolist() if hasattr(query_vector, 'tolist') else query_vector
         else:
@@ -247,14 +242,14 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
                 AND 1 - (embedding <=> :qe) > 0.6
                 {duration_filter_sql}
             """
-            semantic_count = session.execute(
+            semantic_count = (await session.execute(
                 text(count_sql), {"qe": str(embedding_list)}
-            ).scalar() or 0
+            )).scalar() or 0
             print(f"📊 Found {semantic_count} semantically relevant videos in DB (similarity > 0.6)")
             needs_youtube = semantic_count < top_n
         else:
             # Fallback: ILIKE text match count
-            db_videos, _ = check_query_in_db(query, video_duration=video_duration, db_session=session)
+            db_videos, _ = await check_query_in_db(query, video_duration=video_duration, db_session=session)
             db_count = len(db_videos) if db_videos else 0
             print(f"📊 Found {db_count} keyword-matching videos in DB (duration: {video_duration})")
             needs_youtube = db_count < top_n
@@ -263,14 +258,14 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
         if needs_youtube:
             print(f"⚠️ Not enough relevant videos in DB, fetching from YouTube...")
             try:
-                inserted = fetch_and_store_videos(
+                inserted = await fetch_and_store_videos(
                     query,
                     max_results=20,
                     video_duration=video_duration,
                     db_session=session
                 )
                 if inserted > 0:
-                    session.commit()
+                    await session.commit()
                     print(f"✅ Added {inserted} new videos from YouTube")
             except Exception as yt_error:
                 print(f"⚠️ YouTube fetch failed: {yt_error}")
@@ -284,7 +279,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
         # because the newly inserted videos don't have embeddings yet.
         if needs_youtube:
             print("🚀 Fresh Fetch Priority: Retrieving keyword-matched videos first...")
-            text_result = _execute_text_search(session, query, duration_filter_sql, top_n)
+            text_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
             _process_text_rows(text_result, seen_ids, videos, base_score=0.7)
 
         # Then, if we still need more videos, perform Vector Search (pgvector)
@@ -308,7 +303,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
             LIMIT :limit
             """
             
-            result = session.execute(
+            result = await session.execute(
                 text(sql),
                 {
                     "query_embedding": str(embedding_list),
@@ -341,7 +336,7 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
             else:
                 print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
             
-            fallback_result = _execute_text_search(session, query, duration_filter_sql, top_n)
+            fallback_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
             # Use 0.7 base score if we have a vector goal, else use popularity ranking
             text_base = 0.7 if query_vector is not None else None
             _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
@@ -357,9 +352,8 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
                 popularity = 0.5 * views_norm + 0.5 * likes_norm
                 v["score"] = 0.7 * v["score"] + 0.3 * popularity
 
-        # Only close if we created it
-        if session_gen:
-            session_gen.close()
+        if own_session:
+            await session.close()
 
         elapsed_time = time.time() - start_time
         print(f"Search completed in {elapsed_time:.2f} seconds")
@@ -368,20 +362,19 @@ def recommend(query, top_n=5, user_id="guest", video_duration="any", db_session=
         
     except Exception as e:
         print(f"[ERROR] Recommend failed: {e}")
-        # Ensure cleanup on error
-        if session_gen:
-            session_gen.close()
+        if own_session:
+            await session.close()
         return []
 
-def log_search(query, user_id="guest", db_session=None):
+async def log_search(query, user_id="guest", db_session=None):
     """Log user search query using SQLAlchemy ORM."""
-    session = None
-    session_gen = None
-    
+    own_session = False
+
     if db_session:
         session = db_session
     else:
-        session, session_gen = _get_local_session()
+        session = _get_local_async_session()
+        own_session = True
 
     try:
         # Convert string user_id to UUID if it's not already
@@ -397,25 +390,25 @@ def log_search(query, user_id="guest", db_session=None):
         if user_uuid:
             search_entry = UserSearch(user_id=user_uuid, query=query)
             session.add(search_entry)
-            if not db_session:
-                session.commit()  # Only commit if we own the session
+            if own_session:
+                await session.commit()
     except Exception as e:
         print(f"Failed to log search: {e}")
-        if not db_session:
-            session.rollback()  # Only rollback if we own the session
+        if own_session:
+            await session.rollback()
     finally:
-        if session_gen:
-            session_gen.close()
+        if own_session:
+            await session.close()
 
-def get_user_profile(user_id, db_session=None):
+async def get_user_profile(user_id, db_session=None):
     """Get user's search history and compute average embedding for personalization."""
-    session = None
-    session_gen = None
-    
+    own_session = False
+
     if db_session:
         session = db_session
     else:
-        session, session_gen = _get_local_session()
+        session = _get_local_async_session()
+        own_session = True
 
     try:
         # Convert string user_id to UUID if needed
@@ -424,58 +417,63 @@ def get_user_profile(user_id, db_session=None):
             try:
                 user_uuid = UUID(user_id)
             except ValueError:
-                if session_gen: session_gen.close()
                 return None  # Invalid UUID
         else:
             user_uuid = user_id
 
         # Get recent search queries for this user
-        searches = session.query(UserSearch).filter(
-            UserSearch.user_id == user_uuid
-        ).order_by(UserSearch.search_time.desc()).limit(10).all()
+        from sqlalchemy import select as sa_select
+        result = await session.execute(
+            sa_select(UserSearch)
+            .filter(UserSearch.user_id == user_uuid)
+            .order_by(UserSearch.search_time.desc())
+            .limit(10)
+        )
+        searches = result.scalars().all()
 
         queries = [search.query for search in searches]
-        # cleanup
-        if session_gen: session_gen.close()
+        if own_session:
+            await session.close()
 
         if not queries:
             return None
 
-        embeddings = create_query_embeddings(queries)
+        embeddings = await create_query_embeddings(queries)
         if not embeddings:
             return None
 
         return np.mean(embeddings, axis=0)
     except Exception as e:
         print(f"Failed to get user profile: {e}")
-        if session_gen:
-            session_gen.close()
+        if own_session:
+            await session.close()
         return None
 
-def check_query_in_db(query, video_duration="any", db_session=None):
-    session = None
-    session_gen = None
-    
+async def check_query_in_db(query, video_duration="any", db_session=None):
+    own_session = False
+
     if db_session:
         session = db_session
     else:
-        session, session_gen = _get_local_session()
+        session = _get_local_async_session()
+        own_session = True
 
     try:
-        # Base text filter (escape SQL wildcards in user input)
+        from sqlalchemy import select, or_
         escaped = _escape_like(query)
         pattern = f"%{escaped}%"
-        text_filter = Video.title.ilike(pattern, escape='\\') | Video.description.ilike(pattern, escape='\\')
-        q = session.query(Video).filter(text_filter)
-
-        # Apply duration filter if specified
+        stmt = select(Video).where(
+            or_(
+                Video.title.ilike(pattern, escape='\\'),
+                Video.description.ilike(pattern, escape='\\')
+            )
+        )
         duration_filter = _build_duration_orm_filter(video_duration)
         if duration_filter is not None:
-            q = q.filter(duration_filter)
+            stmt = stmt.where(duration_filter)
+        result = await session.execute(stmt.limit(20))
+        videos = result.scalars().all()
 
-        videos = q.limit(20).all()
-
-        # Check if any of the matched videos have embeddings
         has_embeddings = any(v.embedding is not None for v in videos)
 
         video_list = [
@@ -491,11 +489,12 @@ def check_query_in_db(query, video_duration="any", db_session=None):
         ]
         return video_list, has_embeddings
     finally:
-        if session_gen:
-            session_gen.close()
+        if own_session:
+            await session.close()
 
 if __name__ == "__main__":
-    results = recommend("atom class 11", top_n=10, user_id="test_user")
+    import asyncio
+    results = asyncio.run(recommend("atom class 11", top_n=10, user_id="test_user"))
     for video in results:
         print(f"Title: {video['title']}")
         print(f"Channel: {video['channel']}")

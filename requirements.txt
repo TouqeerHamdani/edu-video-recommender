@@ -6,6 +6,7 @@ python-multipart==0.0.6
 # Database
 SQLAlchemy==2.0.23
 psycopg2-binary>=2.9.9
+asyncpg>=0.29.0
 pgvector==0.2.4
 alembic==1.13.0
 
@@ -14,11 +15,11 @@ python-dotenv==1.0.0
 PyJWT==2.8.0
 
 # Utilities
+httpx>=0.25.0,<0.28.0
 requests==2.31.0
 isodate==0.6.1
 supabase>=2.0.0
 
-# Testing (pinned httpx for Starlette TestClient compatibility)
+# Testing
 pytest>=7.0.0
 pytest-cov>=4.0.0
-httpx>=0.25.0,<0.28.0

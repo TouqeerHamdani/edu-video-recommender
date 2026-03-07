@@ -7,6 +7,7 @@ import os
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
@@ -72,3 +73,25 @@ def test_connection():
             return True, "Database connection successful"
     except Exception as e:
         return False, f"Database connection failed: {str(e)}"
+
+
+# ---------------------------------------------------------------------------
+# Async engine — FastAPI endpoints (Option B: asyncpg driver)
+# ---------------------------------------------------------------------------
+ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=20,
+    max_overflow=20,
+)
+
+AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def get_async_db():
+    """Async session dependency for FastAPI endpoints. Uses asyncpg driver."""
+    async with AsyncSessionLocal() as session:
+        yield session

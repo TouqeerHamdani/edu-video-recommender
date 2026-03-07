@@ -13,12 +13,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 load_dotenv()
 
 from backend import auth
-from backend.database import get_db, init_db, test_connection
+from backend.database import get_async_db, init_db, test_connection
 from backend.models import UserInteraction, Video
 from backend.schemas import (
     HealthResponse,
@@ -189,7 +190,7 @@ async def get_recommendations(
     query: str,
     duration: str = "any",
     current_user: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db)  # Injected session
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get video recommendations.
@@ -206,9 +207,8 @@ async def get_recommendations(
         )
     
     try:
-        # Pass the injected session to helper functions
-        log_search(query, user_id=current_user, db_session=db)
-        results = recommend(query, top_n=10, user_id=current_user, video_duration=duration, db_session=db)
+        await log_search(query, user_id=current_user, db_session=db)
+        results = await recommend(query, top_n=10, user_id=current_user, video_duration=duration, db_session=db)
         
         # Convert dict results to Pydantic models
         valid_results = []
@@ -230,14 +230,14 @@ async def get_recommendations(
 async def log_interaction(
     interaction: InteractionRequest,
     current_user: str = Depends(get_current_user_id),
-    db: object = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Log a user interaction (click, watch, like, rating) with a video.
     """
     try:
-        # Look up video by youtube_id (string) since frontend sends YouTube IDs
-        video = db.query(Video).filter(Video.youtube_id == interaction.video_id).first()
+        result = await db.execute(select(Video).filter(Video.youtube_id == interaction.video_id))
+        video = result.scalars().first()
         if not video:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -251,8 +251,8 @@ async def log_interaction(
             rating=interaction.rating,
         )
         db.add(new_interaction)
-        db.commit()
-        db.refresh(new_interaction)
+        await db.commit()
+        await db.refresh(new_interaction)
 
         logger.info(
             f"Logged interaction: user={current_user}, video={interaction.video_id}, type={interaction.interaction_type}"
@@ -266,7 +266,7 @@ async def log_interaction(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error logging interaction: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

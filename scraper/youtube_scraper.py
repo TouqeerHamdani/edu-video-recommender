@@ -1,16 +1,15 @@
 import os
 
 import isodate
-import requests
+import httpx
 from dotenv import load_dotenv
 
-from backend.database import get_session
 from backend.models import Video
 
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-def fetch_videos(query, max_results=10, video_duration="any", video_category_id="27"):
+async def fetch_videos(query, max_results=10, video_duration="any", video_category_id="27"):
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         'part': 'snippet',
@@ -21,24 +20,28 @@ def fetch_videos(query, max_results=10, video_duration="any", video_category_id=
         'videoDuration': video_duration,
         'videoCategoryId': video_category_id
     }
-    response = requests.get(url, params=params)
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, params=params)
     return response.json().get('items', [])
 
-def get_video_details(video_ids):
+async def get_video_details(video_ids):
     url = "https://www.googleapis.com/youtube/v3/videos"
     params = {
         'part': 'snippet,statistics,contentDetails',
         'id': ','.join(video_ids),
         'key': API_KEY
     }
-    response = requests.get(url, params=params)
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, params=params)
     return response.json().get('items', [])
 
-def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
-    """Insert a video into the database. Uses provided session or creates new one."""
-    session = db_session if db_session else get_session()
-    owns_session = db_session is None
-    
+async def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
+    """Insert a video into the database. Uses provided AsyncSession or creates new one."""
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    own_session = db_session is None
+    session = db_session if db_session else AsyncSessionLocal()
+
     try:
         title = video['snippet']['title']
         description = video['snippet']['description']
@@ -47,10 +50,10 @@ def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
         except:
             duration_seconds = 0
 
-        existing = session.query(Video).filter(Video.youtube_id == video['id']).first()
-        if existing:
-            if owns_session:
-                session.close()
+        result = await session.execute(select(Video).filter(Video.youtube_id == video['id']))
+        if result.scalars().first():
+            if own_session:
+                await session.close()
             return False
 
         video_record = Video(
@@ -63,19 +66,19 @@ def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
             upload_date=video['snippet'].get('publishedAt', ''),
             view_count=int(video['statistics'].get('viewCount', 0)),
             like_count=int(video['statistics'].get('likeCount', 0)),
-            embedding=None  
+            embedding=None
         )
         session.add(video_record)
-        if owns_session:
-            session.commit()
+        if own_session:
+            await session.commit()
         return True
     except Exception:
-        if owns_session:
-            session.rollback()
+        if own_session:
+            await session.rollback()
         return False
     finally:
-        if owns_session:
-            session.close()
+        if own_session:
+            await session.close()
 
 
 def is_youtube_short(video):
@@ -97,7 +100,7 @@ def is_educational_video(video):
     return category_id == '27'
 
 
-def fetch_and_store_videos(query, max_results=20, video_duration="any", db_session=None):
+async def fetch_and_store_videos(query, max_results=20, video_duration="any", db_session=None):
     """
     Fetch videos from YouTube API, filter out Shorts and non-educational,
     then store valid videos in the database.
@@ -106,31 +109,26 @@ def fetch_and_store_videos(query, max_results=20, video_duration="any", db_sessi
     """
     print(f"🔍 Fetching videos from YouTube for: '{query}'")
     
-    # Fetch from YouTube (already filters by category 27 and duration)
-    yt_results = fetch_videos(query, max_results=max_results, video_duration=video_duration)
+    yt_results = await fetch_videos(query, max_results=max_results, video_duration=video_duration)
     video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item.get("id", {})]
     
     if not video_ids:
         print("⚠️ No video IDs returned from YouTube API.")
         return 0
     
-    # Get full video details
-    video_details = get_video_details(video_ids)
+    video_details = await get_video_details(video_ids)
     inserted_count = 0
     
     for video in video_details:
-        # Skip YouTube Shorts
         if is_youtube_short(video):
             print(f"⏭️ Skipped Short: {video['snippet']['title'][:50]}")
             continue
         
-        # Skip non-educational videos
         if not is_educational_video(video):
             print(f"⏭️ Skipped non-educational: {video['snippet']['title'][:50]}")
             continue
         
-        # Insert valid video
-        if insert_video(video, subject="Auto", difficulty="Medium", db_session=db_session):
+        if await insert_video(video, subject="Auto", difficulty="Medium", db_session=db_session):
             inserted_count += 1
     
     print(f"✅ Inserted {inserted_count} educational videos into database.")

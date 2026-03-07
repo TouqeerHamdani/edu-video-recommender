@@ -43,7 +43,7 @@ class Video(Base):
     view_count = Column(Integer, default=0)
     like_count = Column(Integer, default=0)
     embedding = Column(Vector(384), nullable=True)  # MiniLM-L6-v2 produces 384-dim vectors (nullable for Phase 1)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     
     # Relationships
     interactions = relationship("UserInteraction", back_populates="video", cascade="all, delete-orphan")
@@ -78,7 +78,7 @@ class UserSearch(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False, index=True)
     query = Column(Text, nullable=False)
-    search_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    search_time = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     
     # Relationships
     user = relationship("User", back_populates="UserSearches")
@@ -108,7 +108,7 @@ class UserInteraction(Base):
     video_id = Column(Integer, ForeignKey("videos.id"), nullable=False, index=True)
     interaction_type = Column(String(20), nullable=False)  # 'click', 'watch', 'like', 'rating'
     rating = Column(Integer, nullable=True)  # 1-5, only for rating interactions
-    interaction_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    interaction_time = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     
     # Relationships
     video = relationship("Video", back_populates="interactions")
