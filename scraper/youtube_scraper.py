@@ -65,7 +65,7 @@ async def insert_video(video, subject="Science", difficulty="Easy", db_session=N
         description = video['snippet']['description']
         try:
             duration_seconds = int(isodate.parse_duration(video['contentDetails']['duration']).total_seconds())
-        except:
+        except Exception:
             duration_seconds = 0
 
         # Avoids a SELECT before INSERT by using ON CONFLICT DO NOTHING
