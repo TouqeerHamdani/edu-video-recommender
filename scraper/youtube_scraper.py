@@ -1,3 +1,4 @@
+import logging
 import os
 
 import isodate
@@ -13,7 +14,7 @@ async def fetch_videos(query, max_results=10, video_duration="any", video_catego
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         'part': 'snippet',
-        'q': query,
+        'q': f'{query} -"#shorts" -shorts',
         'type': 'video',
         'maxResults': max_results,
         'key': API_KEY,
@@ -22,6 +23,14 @@ async def fetch_videos(query, max_results=10, video_duration="any", video_catego
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(url, params=params)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logging.error(f"YouTube search API error {exc.response.status_code}: {exc}")
+        return []
+    except httpx.RequestError as exc:
+        logging.error(f"YouTube search request failed: {exc}")
+        return []
     return response.json().get('items', [])
 
 async def get_video_details(video_ids):
@@ -33,6 +42,14 @@ async def get_video_details(video_ids):
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(url, params=params)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logging.error(f"YouTube video details API error {exc.response.status_code}: {exc}")
+        return []
+    except httpx.RequestError as exc:
+        logging.error(f"YouTube video details request failed: {exc}")
+        return []
     return response.json().get('items', [])
 
 async def insert_video(video, subject="Science", difficulty="Easy", db_session=None):

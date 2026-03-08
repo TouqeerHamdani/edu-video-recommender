@@ -7,8 +7,10 @@ import os
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 load_dotenv()
 
@@ -19,16 +21,27 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME")
 
-# Build PostgreSQL connection string
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# Build PostgreSQL connection URLs as structured objects so special characters in
+# credentials are handled correctly and driver substitution is explicit, not fragile.
+_sync_url = URL.create(
+    drivername="postgresql",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=int(DB_PORT),
+    database=DB_NAME,
+)
 
-# Create SQLAlchemy engine with connection pooling
+# Expose a rendered string for logging / external consumers that need a plain URL.
+DATABASE_URL = _sync_url.render_as_string(hide_password=False)
+
+# Create SQLAlchemy engine — used only at startup (init_db, test_connection); NullPool avoids
+# holding persistent connections for a path that never runs under load.
 engine = create_engine(
-    DATABASE_URL,
+    _sync_url,
     echo=False,  # Set to True for SQL query logging
     pool_pre_ping=True,  # Verify connections before using them
-    pool_size=20,   # raised to 20 — total (20+20=40) matches FastAPI's default threadpool (report §3.4)
-    max_overflow=20,
+    poolclass=NullPool,  # no persistent pool — connect-on-demand, close immediately
 )
 
 # Session factory
@@ -78,14 +91,15 @@ def test_connection():
 # ---------------------------------------------------------------------------
 # Async engine — FastAPI endpoints (Option B: asyncpg driver)
 # ---------------------------------------------------------------------------
-ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+# Derive async URL by replacing only the drivername — credentials and params are preserved.
+_async_url = _sync_url.set(drivername="postgresql+asyncpg")
 
 async_engine = create_async_engine(
-    ASYNC_DATABASE_URL,
+    _async_url,
     echo=False,
     pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=20,
+    pool_size=10,    # max 20 connections total (10 base + 10 overflow) — well within Supabase limits
+    max_overflow=10,
 )
 
 AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False, class_=AsyncSession)

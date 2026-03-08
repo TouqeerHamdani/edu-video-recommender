@@ -40,25 +40,12 @@
     searchInput.value = query;
   }
 
-  if (!query) {
-    resultsSection.innerHTML = "<p style='text-align:center;'>No query provided.</p>";
-  } else {
-    // Build API URL with query and duration
-    const apiUrl = `/api/recommend?query=${encodeURIComponent(query)}&duration=${encodeURIComponent(duration)}`;
+  // Client-side cache: localStorage persists across tab closes and browser restarts.
+  // Each entry wraps results with a timestamp; entries older than TTL_MS are treated as misses.
+  const CACHE_KEY = `rec:${query}:${duration}`;
+  const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-    fetch(apiUrl, { credentials: 'include' })
-      .then(res => {
-        if (res.status === 401) {
-          // Not logged in — redirect to auth
-          window.location.href = '/auth';
-          throw new Error('Unauthorized');
-        }
-        if (!res.ok) {
-          throw new Error(`Server error: ${res.status} ${res.statusText}`);
-        }
-        return res.json();
-      })
-      .then(data => {
+  function renderResults(data) {
         resultsSection.innerHTML = "";
 
         if (!data.results || data.results.length === 0) {
@@ -107,12 +94,53 @@
 
           resultsSection.appendChild(card);
         });
-      })
-      .catch(err => {
-        if (err.message !== 'Unauthorized') {
-          console.error("Fetch error:", err);
-          resultsSection.innerHTML = "<p style='text-align:center;'>Could not load recommendations.</p>";
+  }
+
+  if (!query) {
+    resultsSection.innerHTML = "<p style='text-align:center;'>No query provided.</p>";
+  } else {
+    // Check client-side cache first — avoids full round-trip for repeated queries
+    let cacheHit = false;
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const entry = JSON.parse(raw);
+        if (entry && entry.cachedAt && (Date.now() - entry.cachedAt < TTL_MS)) {
+          renderResults(entry.data);
+          cacheHit = true;
+        } else {
+          localStorage.removeItem(CACHE_KEY); // expired — evict and fall through
         }
-      });
+      }
+    } catch (e) {
+      localStorage.removeItem(CACHE_KEY); // corrupted entry — fall through to fetch
+    }
+
+    if (!cacheHit) {
+      const apiUrl = `/api/recommend?query=${encodeURIComponent(query)}&duration=${encodeURIComponent(duration)}`;
+      fetch(apiUrl, { credentials: 'include' })
+        .then(res => {
+          if (res.status === 401) {
+            window.location.href = '/auth';
+            throw new Error('Unauthorized');
+          }
+          if (!res.ok) {
+            throw new Error(`Server error: ${res.status} ${res.statusText}`);
+          }
+          return res.json();
+        })
+        .then(data => {
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ data, cachedAt: Date.now() }));
+          } catch (e) { /* quota exceeded — skip caching */ }
+          renderResults(data);
+        })
+        .catch(err => {
+          if (err.message !== 'Unauthorized') {
+            console.error("Fetch error:", err);
+            resultsSection.innerHTML = "<p style='text-align:center;'>Could not load recommendations.</p>";
+          }
+        });
+    }
   }
 })();

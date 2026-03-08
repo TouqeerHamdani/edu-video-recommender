@@ -8,32 +8,57 @@ from sqlalchemy import text
 
 from backend.models import UserSearch, Video
 
-# Cached after the first request — avoids a per-request DB round-trip (report §3.3)
-_has_embeddings_cache = None
+# Cached after the first request — avoids a per-request DB round-trip (report §3.3).
+# Stores {"value": bool, "ts": float} so the result refreshes after _HAS_EMBEDDINGS_TTL
+# seconds. This prevents a permanent False when the embedder runs after server startup.
+_has_embeddings_cache: dict = {}
+_HAS_EMBEDDINGS_TTL = 1800  # seconds (30 min) — embeddings don't disappear; force_refresh=True handles post-embed invalidation
 
 
-async def _check_has_embeddings(session) -> bool:
-    """Return True if any video with an embedding exists. Result is cached permanently."""
+async def _check_has_embeddings(session, force_refresh: bool = False) -> bool:
+    """Return True if any video with an embedding exists.
+
+    Result is cached for _HAS_EMBEDDINGS_TTL seconds. Pass force_refresh=True to
+    bypass the cache immediately (e.g., after an embedding write batch).
+    """
     global _has_embeddings_cache
-    if _has_embeddings_cache is None:
-        from sqlalchemy import select
-        result = await session.execute(
-            select(Video).filter(Video.embedding.isnot(None)).limit(1)
-        )
-        _has_embeddings_cache = result.scalars().first() is not None
-    return _has_embeddings_cache
+    now = time.monotonic()
+    cached = _has_embeddings_cache
+    if (
+        not force_refresh
+        and cached
+        and (now - cached["ts"]) < _HAS_EMBEDDINGS_TTL
+    ):
+        return cached["value"]
+
+    from sqlalchemy import select
+    result = await session.execute(
+        select(Video).filter(Video.embedding.isnot(None)).limit(1)
+    )
+    value = result.scalars().first() is not None
+    _has_embeddings_cache = {"value": value, "ts": now}
+    return value
 
 # Cloudflare Workers AI configuration
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_BGE_URL = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/baai/bge-small-en-v1.5"
 
+# Server-side embedding cache — keyed by query string, value is the raw float list.
+# Embeddings are deterministic so no expiry is needed. Each 384-dim vector ≈ 1.5 KB,
+# so 1,000 entries ≈ 1.5 MB. Shared across all requests in this process (report §2.1).
+_embedding_cache: dict[str, list] = {}
+
 
 async def create_query_embedding(query):
     """
     Create query embedding using Cloudflare Workers AI bge-small-en-v1.5.
     Returns 384-dimensional embedding for vector search.
+    Result is cached in-process to avoid repeated Cloudflare API calls (report §2.1).
     """
+    if query in _embedding_cache:
+        return np.array(_embedding_cache[query], dtype=np.float32)
+
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
         logging.warning("Cloudflare credentials not set. Vector search disabled.")
         return None
@@ -55,7 +80,9 @@ async def create_query_embedding(query):
         # Extract embedding from response
         if result.get("success") and result.get("result", {}).get("data"):
             embedding = result["result"]["data"][0]
-            return np.array(embedding, dtype=np.float32)
+            vector = np.array(embedding, dtype=np.float32)
+            _embedding_cache[query] = embedding  # store raw list, not numpy array
+            return vector
         else:
             logging.error(f"Unexpected Cloudflare response: {result}")
             return None
@@ -268,7 +295,8 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
                     db_session=session
                 )
                 if inserted > 0:
-                    await session.commit()
+                    if own_session:
+                        await session.commit()
                     print(f"✅ Added {inserted} new videos from YouTube")
             except Exception as yt_error:
                 print(f"⚠️ YouTube fetch failed: {yt_error}")
