@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,9 +50,9 @@ async def lifespan(app: FastAPI):
         # but for now we log and proceed (or re-raise to crash).
         # User requested fail-fast for secrets, implies we should fail fast here too.
         raise
-    
+
     yield
-    
+
     logger.info("Shutting down...")
 
 # --- App Definition ---
@@ -149,17 +149,17 @@ async def health():
     """Health check endpoint."""
     # Note: test_connection is sync, blocking.
     db_success, db_message = test_connection()
-    
+
     # Simple ORM check
     orm_status = "unknown"
     try:
-        # We need a fresh session here. 
+        # We need a fresh session here.
         # Since get_db is a generator, we must iterate or use context manager if we adapted it.
         # But for quick check we can use the engine directly or the raw connection?
         # Let's use the generator manually for this check to be safe.
 
         from backend.database import get_db
-        
+
         # Check connection via engine (already done in test_connection roughly)
         # Check models via session
         gen = get_db()
@@ -173,10 +173,10 @@ async def health():
         finally:
             # We must close/next
             gen.close()
-            
+
     except Exception as e:
         orm_status = f"error: {str(e)}"
-    
+
     return HealthResponse(
         status="ok" if db_success else "error",
         message="Edu Video Recommender API",
@@ -188,6 +188,7 @@ async def health():
 @app.get("/api/recommend", response_model=RecommendationResponse)
 async def get_recommendations(
     query: str,
+    background_tasks: BackgroundTasks,
     duration: str = "any",
     current_user: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_db)
@@ -199,25 +200,32 @@ async def get_recommendations(
     duration = duration.lower() if duration else "any"
     if duration not in allowed_durations:
         duration = "any"
-    
+
     if not query:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query parameter is required"
         )
-    
+
     try:
         await log_search(query, user_id=current_user, db_session=db)
         results = await recommend(query, top_n=10, user_id=current_user, video_duration=duration, db_session=db)
-        
+
         # Convert dict results to Pydantic models
         valid_results = []
         for r in results:
             # Ensure safety if keys missing
             valid_results.append(VideoResult(**r))
 
+        # Schedule background ingestion if we didn't find enough results
+        if len(valid_results) < 10:
+            from scraper.youtube_scraper import fetch_and_store_videos
+            # We can't pass the same db_session to the background task because it will be closed
+            # when the request completes. Passing None will tell fetch_and_store_videos to create its own.
+            background_tasks.add_task(fetch_and_store_videos, query, 20, duration, None)
+
         return RecommendationResponse(results=valid_results)
-    
+
     except Exception as e:
         logger.error(f"Error in /api/recommend: {e}", exc_info=True)
         raise HTTPException(

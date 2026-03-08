@@ -62,7 +62,7 @@ async def create_query_embedding(query):
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
         logging.warning("Cloudflare credentials not set. Vector search disabled.")
         return None
-    
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
@@ -70,13 +70,13 @@ async def create_query_embedding(query):
                 headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
                 json={"text": query},
             )
-        
+
         if response.status_code != 200:
             logging.error(f"Cloudflare API error: {response.status_code} - {response.text}")
             return None
-        
+
         result = response.json()
-        
+
         # Extract embedding from response
         if result.get("success") and result.get("result", {}).get("data"):
             embedding = result["result"]["data"][0]
@@ -86,7 +86,7 @@ async def create_query_embedding(query):
         else:
             logging.error(f"Unexpected Cloudflare response: {result}")
             return None
-        
+
     except Exception as e:
         logging.error(f"Failed to create query embedding: {e}")
         return None
@@ -167,33 +167,97 @@ def _escape_like(query):
     return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-async def _execute_text_search(session, query, duration_filter_sql, limit):
-    """Run a full-text search using the GIN tsvector index (report §3.1).
+async def _execute_hybrid_search(session, query, embedding_list, duration_filter_sql, limit):
+    """
+    Run a hybrid search combining Semantic (pgvector), Keyword (pg_trgm + FTS), and Fuzzy matching
+    using Reciprocal Rank Fusion (RRF).
+    """
+    # If no embedding is available, fallback to only FTS and Fuzzy
+    if embedding_list is None:
+        sql = f"""
+        WITH keyword_search AS (
+            SELECT id,
+                   ts_rank(to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '')),
+                           websearch_to_tsquery('english', :query)) as rank_score
+            FROM videos
+            WHERE to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
+                  @@ websearch_to_tsquery('english', :query) {duration_filter_sql}
+        ),
+        fuzzy_search AS (
+            SELECT id,
+                   similarity(coalesce(title, '') || ' ' || coalesce(description, ''), :query) as rank_score
+            FROM videos
+            WHERE coalesce(title, '') || ' ' || coalesce(description, '') % :query {duration_filter_sql}
+        ),
+        keyword_ranked AS (
+            SELECT id, row_number() OVER (ORDER BY rank_score DESC) as rank_pos FROM keyword_search
+        ),
+        fuzzy_ranked AS (
+            SELECT id, row_number() OVER (ORDER BY rank_score DESC) as rank_pos FROM fuzzy_search
+        ),
+        rrf_scores AS (
+            SELECT COALESCE(k.id, f.id) as id,
+                   COALESCE(1.0 / (60 + k.rank_pos), 0.0) +
+                   COALESCE(1.0 / (60 + f.rank_pos), 0.0) as rrf_score
+            FROM keyword_ranked k
+            FULL OUTER JOIN fuzzy_ranked f ON k.id = f.id
+        )
+        SELECT v.youtube_id, v.title, v.description, v.thumbnail, v.duration, v.view_count, v.like_count, r.rrf_score as similarity_score
+        FROM rrf_scores r
+        JOIN videos v ON r.id = v.id
+        ORDER BY r.rrf_score DESC
+        LIMIT :limit
+        """
+        params = {"query": query, "limit": limit}
+    else:
+        sql = f"""
+        WITH semantic_search AS (
+            SELECT id,
+                   1 - (embedding <=> :query_embedding) as rank_score
+            FROM videos
+            WHERE embedding IS NOT NULL AND 1 - (embedding <=> :query_embedding) > 0.3 {duration_filter_sql}
+        ),
+        keyword_search AS (
+            SELECT id,
+                   ts_rank(to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '')),
+                           websearch_to_tsquery('english', :query)) as rank_score
+            FROM videos
+            WHERE to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
+                  @@ websearch_to_tsquery('english', :query) {duration_filter_sql}
+        ),
+        fuzzy_search AS (
+            SELECT id,
+                   similarity(coalesce(title, '') || ' ' || coalesce(description, ''), :query) as rank_score
+            FROM videos
+            WHERE coalesce(title, '') || ' ' || coalesce(description, '') % :query {duration_filter_sql}
+        ),
+        semantic_ranked AS (
+            SELECT id, row_number() OVER (ORDER BY rank_score DESC) as rank_pos FROM semantic_search
+        ),
+        keyword_ranked AS (
+            SELECT id, row_number() OVER (ORDER BY rank_score DESC) as rank_pos FROM keyword_search
+        ),
+        fuzzy_ranked AS (
+            SELECT id, row_number() OVER (ORDER BY rank_score DESC) as rank_pos FROM fuzzy_search
+        ),
+        rrf_scores AS (
+            SELECT COALESCE(s.id, COALESCE(k.id, f.id)) as id,
+                   COALESCE(1.0 / (60 + s.rank_pos), 0.0) +
+                   COALESCE(1.0 / (60 + k.rank_pos), 0.0) +
+                   COALESCE(1.0 / (60 + f.rank_pos), 0.0) as rrf_score
+            FROM semantic_ranked s
+            FULL OUTER JOIN keyword_ranked k ON s.id = k.id
+            FULL OUTER JOIN fuzzy_ranked f ON COALESCE(s.id, k.id) = f.id
+        )
+        SELECT v.youtube_id, v.title, v.description, v.thumbnail, v.duration, v.view_count, v.like_count, r.rrf_score as similarity_score
+        FROM rrf_scores r
+        JOIN videos v ON r.id = v.id
+        ORDER BY r.rrf_score DESC
+        LIMIT :limit
+        """
+        params = {"query": query, "query_embedding": str(embedding_list), "limit": limit}
 
-    Uses websearch_to_tsquery which handles multi-word phrases and quoted
-    strings without needing manual query escaping.
-    """
-    sql = f"""
-    SELECT
-        youtube_id,
-        title,
-        description,
-        thumbnail,
-        duration,
-        view_count,
-        like_count,
-        0.0 as similarity_score
-    FROM videos
-    WHERE to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
-          @@ websearch_to_tsquery('english', :query)
-    {duration_filter_sql}
-    ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
-    LIMIT :limit
-    """
-    return await session.execute(
-        text(sql),
-        {"query": query, "limit": limit}
-    )
+    return await session.execute(text(sql), params)
 
 
 def _process_text_rows(rows, seen_ids, videos, base_score=None):
@@ -204,13 +268,13 @@ def _process_text_rows(rows, seen_ids, videos, base_score=None):
             continue
         view_count = view_count or 0
         like_count = like_count or 0
-        
+
         # If no base_score provided, use the old popularity-only logic
         if base_score is not None:
             score = base_score
         else:
             score = float(view_count + 2 * like_count) / 100000
-            
+
         videos.append({
             "video_id": youtube_id,
             "title": title,
@@ -235,7 +299,7 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
     try:
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
-        
+
         # === STEP 1: Build duration filter + generate query embedding ===
         from scraper.youtube_scraper import fetch_and_store_videos
 
@@ -260,140 +324,53 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
         else:
             print("⏭️ Skipping embedding — no embedded videos exist in DB")
 
-        # === STEP 2: Supply check — LIMIT probe instead of COUNT (report §4.1) ===
-        _initial_text_rows = None  # cached FTS rows for reuse in Step 4 (no-embedding path only)
-        if query_vector is not None:
-            # SELECT 1 ... LIMIT top_n stops at top_n rows — far cheaper than COUNT(*)
-            supply_sql = f"""
-                SELECT 1 FROM videos
-                WHERE embedding IS NOT NULL
-                AND 1 - (embedding <=> :qe) > 0.6
-                {duration_filter_sql}
-                LIMIT :limit
-            """
-            supply_rows = (await session.execute(
-                text(supply_sql), {"qe": str(embedding_list), "limit": top_n}
-            )).fetchall()
-            print(f"📊 Found {len(supply_rows)} semantically relevant videos in DB (similarity > 0.6)")
-            needs_youtube = len(supply_rows) < top_n
-        else:
-            # Run FTS once and cache rows — reused in Step 4 fallback if no YouTube fetch needed
-            _initial_text_rows = (await _execute_text_search(
-                session, query, duration_filter_sql, top_n
-            )).fetchall()
-            print(f"📊 Found {len(_initial_text_rows)} keyword-matching videos in DB (duration: {video_duration})")
-            needs_youtube = len(_initial_text_rows) < top_n
+        # === STEP 2: Execute Hybrid RRF Search ===
+        print("Executing Hybrid Search (Vector + FTS + Fuzzy) using Reciprocal Rank Fusion...")
+        result = await _execute_hybrid_search(session, query, embedding_list, duration_filter_sql, top_n)
+        rows = result.fetchall()
 
-        # === STEP 3: Fetch from YouTube if not enough ===
-        if needs_youtube:
-            print("⚠️ Not enough relevant videos in DB, fetching from YouTube...")
-            try:
-                inserted = await fetch_and_store_videos(
-                    query,
-                    max_results=20,
-                    video_duration=video_duration,
-                    db_session=session
-                )
-                if inserted > 0:
-                    if own_session:
-                        await session.commit()
-                    print(f"✅ Added {inserted} new videos from YouTube")
-            except Exception as yt_error:
-                print(f"⚠️ YouTube fetch failed: {yt_error}")
-
-        # === STEP 4: Search and recommend from database ===
-        
         videos = []
         seen_ids = set()
 
-        # If a fresh fetch was triggered, we PRIORITIZE text results (ILIKE)
-        # because the newly inserted videos don't have embeddings yet.
-        if needs_youtube:
-            print("🚀 Fresh Fetch Priority: Retrieving keyword-matched videos first...")
-            text_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
-            _process_text_rows(text_result, seen_ids, videos, base_score=0.7)
+        # Process the hybrid results
+        _process_text_rows(rows, seen_ids, videos, base_score=None) # We use None so _process_text_rows uses popularity logic, but wait, we should pass similarity_score instead of popularity.
 
-        # Then, if we still need more videos, perform Vector Search (pgvector)
-        if query_vector is not None and len(videos) < top_n:
-            print(f"Using Vector Search (pgvector) for remaining {top_n - len(videos)} slots")
-            sql = f"""
-            SELECT
-                youtube_id,
-                title,
-                description,
-                thumbnail,
-                duration,
-                view_count,
-                like_count,
-                1 - (embedding <=> :query_embedding) as similarity_score
-            FROM videos
-            WHERE embedding IS NOT NULL
-            AND 1 - (embedding <=> :query_embedding) > 0.5
-            {duration_filter_sql}
-            ORDER BY embedding <=> :query_embedding ASC
-            LIMIT :limit
-            """
-            
-            result = await session.execute(
-                text(sql),
-                {
-                    "query_embedding": str(embedding_list),
-                    "limit": top_n - len(videos)
-                }
-            )
+        # Actually _process_text_rows doesn't use the similarity score correctly, so let's process manually
+        videos = []
+        for row in rows:
+            youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
+            view_count = view_count or 0
+            like_count = like_count or 0
 
-            for row in result:
-                youtube_id, title, description, thumbnail, duration, view_count, like_count, similarity = row
-                if youtube_id in seen_ids:
-                    continue
-                final_score = float(similarity) if similarity is not None else 0.0
-                videos.append({
-                    "video_id": youtube_id,
-                    "title": title,
-                    "description": description,
-                    "thumbnail": thumbnail,
-                    "channel": "YouTube",
-                    "link": f"https://www.youtube.com/watch?v={youtube_id}",
-                    "score": final_score,
-                    "views": view_count,
-                    "likes": like_count
-                })
-                seen_ids.add(youtube_id)
+            # Blend RRF score with popularity
+            views_norm = min(view_count / 1000000, 1.0) # Cap at 1M
+            likes_norm = min(like_count / 50000, 1.0) # Cap at 50k
+            popularity = 0.5 * views_norm + 0.5 * likes_norm
+            final_score = (similarity * 0.7) + (popularity * 0.3)
 
-        # Fallback: if we still don't have enough, or if query_vector was skipped
-        if len(videos) < top_n:
-            text_base = 0.7 if query_vector is not None else None
-            # Reuse cached FTS rows when no YouTube fetch occurred — avoids a duplicate query (report §4.1)
-            if _initial_text_rows is not None and not needs_youtube:
-                print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
-                _process_text_rows(_initial_text_rows, seen_ids, videos, base_score=text_base)
-            else:
-                if query_vector is None:
-                    print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
-                else:
-                    print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
-                fallback_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
-                _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
+            videos.append({
+                "video_id": youtube_id,
+                "title": title,
+                "description": description,
+                "thumbnail": thumbnail,
+                "channel": "YouTube",
+                "link": f"https://www.youtube.com/watch?v={youtube_id}",
+                "score": final_score,
+                "views": view_count,
+                "likes": like_count
+            })
 
-        # Blend quality signals into vector search scores:
-        # 70% semantic relevance + 30% normalized popularity (views + likes)
-        if videos and query_vector is not None:
-            max_views = max((v["views"] or 1) for v in videos)
-            max_likes = max((v["likes"] or 1) for v in videos)
-            for v in videos:
-                views_norm = (v["views"] or 0) / max_views
-                likes_norm = (v["likes"] or 0) / max_likes
-                popularity = 0.5 * views_norm + 0.5 * likes_norm
-                v["score"] = 0.7 * v["score"] + 0.3 * popularity
+        videos = sorted(videos, key=lambda v: v["score"], reverse=True)
 
+        # === STEP 3: Return immediately, caller handles background ingestion ===
         if own_session:
             await session.close()
 
         elapsed_time = time.time() - start_time
-        print(f"Search completed in {elapsed_time:.2f} seconds")
-        
-        return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
-        
+        print(f"Hybrid Search completed in {elapsed_time:.2f} seconds. Found {len(videos)} videos.")
+
+        return videos[:top_n]
+
     except Exception as e:
         print(f"[ERROR] Recommend failed: {e}")
         if own_session:
