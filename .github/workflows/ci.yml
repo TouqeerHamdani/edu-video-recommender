@@ -35,5 +35,15 @@ jobs:
           python -m compileall backend/
 
       - name: Run Tests
+        env:
+          supabaseurl: http://localhost:54321
+          supabasekey: test-key-for-ci
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: postgres
+          CLOUDFLARE_ACCOUNT_ID: test
+          CLOUDFLARE_API_TOKEN: test
         run: |
           pytest
