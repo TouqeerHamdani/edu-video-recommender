@@ -2,13 +2,15 @@
 Shared test fixtures for the Edu Video Recommender API.
 """
 import os
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Set test environment before importing app
 os.environ["ENV"] = "development"
 
 from fastapi.testclient import TestClient
+
 from backend.app import app
 
 

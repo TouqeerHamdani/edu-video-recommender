@@ -3,9 +3,8 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 

@@ -1,8 +1,7 @@
 import os
+from typing import Optional
 
 from supabase import Client, create_client
-
-from typing import Optional
 
 _url: Optional[str] = os.environ.get("supabaseurl")
 _key: Optional[str] = os.environ.get("supabasekey")

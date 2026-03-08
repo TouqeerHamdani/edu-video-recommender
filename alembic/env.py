@@ -3,9 +3,10 @@ import os
 import sys
 from logging.config import fileConfig
 
-from alembic import context
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Add project root to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,8 +17,8 @@ dotenv_path = os.path.join(project_root, ".env")
 load_dotenv(dotenv_path)
 
 # Import your models' Base
-from backend.database import Base
 from backend import models  # noqa: F401 - ensures models are registered
+from backend.database import Base
 
 # Alembic Config object
 config = context.config

@@ -3,8 +3,6 @@ Tests for POST /api/interactions endpoint.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from backend.app import app, get_current_user_id
 
 

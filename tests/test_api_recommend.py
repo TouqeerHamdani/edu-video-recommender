@@ -1,8 +1,7 @@
 """
 Tests for /api/recommend endpoint.
 """
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from backend.app import app, get_current_user_id
 
