@@ -13,6 +13,14 @@ async def mock_get_user_id():
     return "test-user-123"
 
 
+@pytest.fixture(autouse=False)
+def auth_override():
+    """Set mock auth dependency override and ensure cleanup even on failure."""
+    app.dependency_overrides[get_current_user_id] = mock_get_user_id
+    yield
+    app.dependency_overrides.clear()
+
+
 class TestInteractionEndpoint:
     """Tests for the interaction logging endpoint."""
 
@@ -24,10 +32,8 @@ class TestInteractionEndpoint:
         )
         assert response.status_code == 401
 
-    def test_click_interaction_success(self, client):
+    def test_click_interaction_success(self, client, auth_override):
         """Logging a click interaction for an existing video returns 201."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         fake_video = MagicMock(id=1)
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = fake_video
@@ -52,12 +58,8 @@ class TestInteractionEndpoint:
         mock_session.add.assert_called_once()
         mock_session.commit.assert_called_once()
 
-        app.dependency_overrides.clear()
-
-    def test_watch_interaction_success(self, client):
+    def test_watch_interaction_success(self, client, auth_override):
         """Logging a watch interaction returns 201."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         fake_video = MagicMock(id=1)
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = fake_video
@@ -78,12 +80,8 @@ class TestInteractionEndpoint:
         assert response.status_code == 201
         assert response.json()["interaction_id"] == 99
 
-        app.dependency_overrides.clear()
-
-    def test_rating_interaction_success(self, client):
+    def test_rating_interaction_success(self, client, auth_override):
         """Rating interaction with a valid rating returns 201."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         fake_video = MagicMock(id=1)
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = fake_video
@@ -104,12 +102,8 @@ class TestInteractionEndpoint:
         assert response.status_code == 201
         assert response.json()["interaction_id"] == 7
 
-        app.dependency_overrides.clear()
-
-    def test_rating_without_value_rejected(self, client):
+    def test_rating_without_value_rejected(self, client, auth_override):
         """Rating interaction without a rating value should be 422."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         response = client.post(
             "/api/interactions",
             json={"video_id": 1, "interaction_type": "rating"},
@@ -117,12 +111,8 @@ class TestInteractionEndpoint:
         )
         assert response.status_code == 422
 
-        app.dependency_overrides.clear()
-
-    def test_rating_out_of_range_rejected(self, client):
+    def test_rating_out_of_range_rejected(self, client, auth_override):
         """Rating outside 1-5 should be rejected."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         response = client.post(
             "/api/interactions",
             json={"video_id": 1, "interaction_type": "rating", "rating": 0},
@@ -137,12 +127,8 @@ class TestInteractionEndpoint:
         )
         assert response.status_code == 422
 
-        app.dependency_overrides.clear()
-
-    def test_invalid_interaction_type_rejected(self, client):
+    def test_invalid_interaction_type_rejected(self, client, auth_override):
         """Unknown interaction type should be 422."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         response = client.post(
             "/api/interactions",
             json={"video_id": 1, "interaction_type": "bookmark"},
@@ -150,12 +136,8 @@ class TestInteractionEndpoint:
         )
         assert response.status_code == 422
 
-        app.dependency_overrides.clear()
-
-    def test_video_not_found_returns_404(self, client):
+    def test_video_not_found_returns_404(self, client, auth_override):
         """Interaction for a nonexistent video returns 404."""
-        app.dependency_overrides[get_current_user_id] = mock_get_user_id
-
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = None
 
@@ -170,5 +152,3 @@ class TestInteractionEndpoint:
 
         assert response.status_code == 404
         assert "not found" in response.json()["error"]
-
-        app.dependency_overrides.clear()

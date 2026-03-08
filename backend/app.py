@@ -114,7 +114,7 @@ async def get_current_user_id(request: Request) -> str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
-        )
+        ) from e
 
 # --- HTML Page Routes ---
 
@@ -223,7 +223,7 @@ async def get_recommendations(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
-        )
+        ) from e
 
 
 @app.post("/api/interactions", response_model=InteractionResponse, status_code=status.HTTP_201_CREATED)
@@ -271,7 +271,7 @@ async def log_interaction(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to log interaction",
-        )
+        ) from e
 
 
 @app.exception_handler(HTTPException)

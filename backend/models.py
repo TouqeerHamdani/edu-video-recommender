@@ -5,7 +5,7 @@ SQLAlchemy ORM models for the Edu Video Recommender.
 - UserInteraction: Track user interactions (clicks, watches) with videos
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text

@@ -5,11 +5,15 @@ description = "Educational Video Recommender API"
 requires-python = ">=3.11"
 
 [tool.ruff]
-line-length = 88
+line-length = 130
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I"]
+ignore = [
+    "E402",  # module-level import not at top — intentional (load_dotenv before DB imports)
+    "B008",  # Depends() in default args — FastAPI's documented pattern
+]
 # E: pycodestyle errors
 # F: pyflakes
 # B: bugbear

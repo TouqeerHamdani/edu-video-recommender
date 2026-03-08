@@ -3,9 +3,8 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -79,7 +78,7 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
 
     except Exception as e:
         logging.error(f"Token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from e
 
 # --- Routes ---
 
@@ -111,9 +110,9 @@ async def register(user: UserRegister):
         # but following user snippet logic:
         err_str = str(e)
         if "already been registered" in err_str:
-            raise HTTPException(status_code=409, detail="A user with this email address has already been registered")
+            raise HTTPException(status_code=409, detail="A user with this email address has already been registered") from e
         logging.exception("Supabase admin user creation failed")
-        raise HTTPException(status_code=502, detail=f"Upstream error: {err_str}")
+        raise HTTPException(status_code=502, detail=f"Upstream error: {err_str}") from e
 
 @router.post("/login")
 async def login(user: UserLogin):
@@ -126,7 +125,7 @@ async def login(user: UserLogin):
             "password": password
         })
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}") from e
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
@@ -175,7 +174,7 @@ async def refresh(request: Request):
         # or explicit refresh_session.
         auth_response = supabase.auth.refresh_session(refresh_token)
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Refresh failed: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Refresh failed: {str(e)}") from e
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")

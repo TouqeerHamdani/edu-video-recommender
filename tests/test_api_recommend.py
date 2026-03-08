@@ -1,8 +1,7 @@
 """
 Tests for /api/recommend endpoint.
 """
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from backend.app import app, get_current_user_id
 
@@ -26,7 +25,7 @@ class TestRecommendEndpoint:
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
         with patch("backend.app.recommend") as mock_recommend, \
-             patch("backend.app.log_search") as mock_log:
+             patch("backend.app.log_search"):
             mock_recommend.return_value = sample_videos
 
             response = client.get(
@@ -47,8 +46,8 @@ class TestRecommendEndpoint:
         """GET /api/recommend with empty query should return 400."""
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
-        with patch("backend.app.recommend") as mock_recommend, \
-             patch("backend.app.log_search") as mock_log:
+        with patch("backend.app.recommend"), \
+             patch("backend.app.log_search"):
             response = client.get(
                 "/api/recommend",
                 params={"query": ""},
@@ -86,7 +85,7 @@ class TestRecommendEndpoint:
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
         with patch("backend.app.recommend") as mock_recommend, \
-             patch("backend.app.log_search") as mock_log:
+             patch("backend.app.log_search"):
             mock_recommend.return_value = []
 
             client.get(
@@ -106,7 +105,7 @@ class TestRecommendEndpoint:
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
         with patch("backend.app.recommend") as mock_recommend, \
-             patch("backend.app.log_search") as mock_log:
+             patch("backend.app.log_search"):
             mock_recommend.return_value = []
 
             client.get(
@@ -129,7 +128,7 @@ class TestRecommendErrorHandling:
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
         with patch("backend.app.recommend") as mock_recommend, \
-             patch("backend.app.log_search") as mock_log:
+             patch("backend.app.log_search"):
             mock_recommend.side_effect = Exception("Database connection failed")
 
             response = client.get(

@@ -82,7 +82,7 @@ def test_connection():
     """
     try:
         with engine.connect() as conn:
-            result = conn.execute(__import__('sqlalchemy').text("SELECT 1"))
+            conn.execute(__import__('sqlalchemy').text("SELECT 1"))
             return True, "Database connection successful"
     except Exception as e:
         return False, f"Database connection failed: {str(e)}"

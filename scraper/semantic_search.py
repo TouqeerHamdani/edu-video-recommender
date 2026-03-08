@@ -1,6 +1,6 @@
-import time
-import os
 import logging
+import os
+import time
 
 import httpx
 import numpy as np
@@ -286,7 +286,7 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
 
         # === STEP 3: Fetch from YouTube if not enough ===
         if needs_youtube:
-            print(f"⚠️ Not enough relevant videos in DB, fetching from YouTube...")
+            print("⚠️ Not enough relevant videos in DB, fetching from YouTube...")
             try:
                 inserted = await fetch_and_store_videos(
                     query,
@@ -493,7 +493,7 @@ async def check_query_in_db(query, video_duration="any", db_session=None):
         own_session = True
 
     try:
-        from sqlalchemy import select, or_
+        from sqlalchemy import or_, select
         escaped = _escape_like(query)
         pattern = f"%{escaped}%"
         stmt = select(Video).where(

@@ -1,8 +1,8 @@
 import logging
 import os
 
-import isodate
 import httpx
+import isodate
 from dotenv import load_dotenv
 
 from backend.models import Video
@@ -55,6 +55,7 @@ async def get_video_details(video_ids):
 async def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
     """Insert a video into the database. Uses provided AsyncSession or creates new one."""
     from sqlalchemy import select
+
     from backend.database import AsyncSessionLocal
     own_session = db_session is None
     session = db_session if db_session else AsyncSessionLocal()
@@ -64,7 +65,7 @@ async def insert_video(video, subject="Science", difficulty="Easy", db_session=N
         description = video['snippet']['description']
         try:
             duration_seconds = int(isodate.parse_duration(video['contentDetails']['duration']).total_seconds())
-        except:
+        except Exception:
             duration_seconds = 0
 
         result = await session.execute(select(Video).filter(Video.youtube_id == video['id']))
