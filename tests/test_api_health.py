@@ -7,12 +7,14 @@ from unittest.mock import patch
 class TestHealthEndpoint:
     """Tests for the health check endpoint."""
 
-    def test_health_returns_200(self, client):
+    @patch("backend.app.test_connection", return_value=(True, "ok"))
+    def test_health_returns_200(self, _mock, client):
         """GET /api/health should return 200 OK."""
         response = client.get("/api/health")
         assert response.status_code == 200
 
-    def test_health_returns_correct_structure(self, client):
+    @patch("backend.app.test_connection", return_value=(True, "ok"))
+    def test_health_returns_correct_structure(self, _mock, client):
         """Health response should contain expected fields."""
         response = client.get("/api/health")
         data = response.json()
@@ -23,12 +25,12 @@ class TestHealthEndpoint:
         assert "orm" in data
         assert "environment" in data
 
-    def test_health_database_connected(self, client):
+    @patch("backend.app.test_connection", return_value=(True, "ok"))
+    def test_health_database_connected(self, _mock, client):
         """Health should report database as connected when DB is up."""
         response = client.get("/api/health")
         data = response.json()
 
-        # If we get 200, database should be connected
         assert data["status"] == "ok"
         assert "connected" in data["database"]
 
