@@ -1,6 +1,6 @@
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class RecommendationRequest(BaseModel):
@@ -15,12 +15,16 @@ class InteractionRequest(BaseModel):
 
     @field_validator("rating")
     @classmethod
-    def validate_rating(cls, v, info):
-        if info.data.get("interaction_type") == "rating" and v is None:
-            raise ValueError("Rating is required for interaction_type 'rating'")
+    def validate_rating_range(cls, v):
         if v is not None and (v < 1 or v > 5):
             raise ValueError("Rating must be between 1 and 5")
         return v
+
+    @model_validator(mode="after")
+    def validate_rating_required(self):
+        if self.interaction_type == "rating" and self.rating is None:
+            raise ValueError("Rating is required for interaction_type 'rating'")
+        return self
 
 
 class InteractionResponse(BaseModel):

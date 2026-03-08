@@ -101,7 +101,7 @@ class TestRecommendEndpoint:
         app.dependency_overrides.clear()
 
     def test_recommend_invalid_duration_defaults_to_medium(self, client):
-        """Invalid duration should default to 'medium'."""
+        """Invalid duration should default to 'any'."""
         app.dependency_overrides[get_current_user_id] = mock_get_user_id
 
         with patch("backend.app.recommend") as mock_recommend, \
@@ -115,7 +115,7 @@ class TestRecommendEndpoint:
             )
 
             call_kwargs = mock_recommend.call_args[1]
-            assert call_kwargs["video_duration"] == "medium"
+            assert call_kwargs["video_duration"] == "any"
 
         app.dependency_overrides.clear()
 

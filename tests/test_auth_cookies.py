@@ -3,17 +3,6 @@ Tests for authentication cookie behavior in dev vs production.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-from fastapi.testclient import TestClient
-
-from backend.app import app
-
-
-@pytest.fixture
-def client():
-    """Create a test client for the FastAPI app."""
-    return TestClient(app)
-
 
 def create_mock_auth_response():
     """Create a mock Supabase auth response."""
