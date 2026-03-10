@@ -112,7 +112,8 @@ async def register(user: UserRegister):
         if "already been registered" in err_str:
             raise HTTPException(status_code=409, detail="A user with this email address has already been registered") from e
         logging.exception("Supabase admin user creation failed")
-        raise HTTPException(status_code=502, detail=f"Upstream error: {err_str}") from e
+        # Prevents Supabase error detail from leaking to client
+        raise HTTPException(status_code=502, detail="Registration failed") from e
 
 @router.post("/login")
 async def login(user: UserLogin):
@@ -125,7 +126,8 @@ async def login(user: UserLogin):
             "password": password
         })
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}") from e
+        # Prevents Supabase error detail from leaking to client
+        raise HTTPException(status_code=401, detail="Invalid credentials") from e
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
