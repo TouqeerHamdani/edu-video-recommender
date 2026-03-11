@@ -47,7 +47,7 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
     and return user claims dict.
     """
     token = None
-    
+
     # Debug logging
     logging.debug("Checking for authentication token")
     if authorization and authorization.startswith("Bearer "):
@@ -64,14 +64,14 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
         # This ensures the token is valid, not revoked, and fresh
         user_response = supabase.auth.get_user(token)
         user = user_response.user
-        
+
         if not user:
              raise HTTPException(status_code=401, detail="Invalid token")
 
         # Construct user dict
         return {
-            "id": user.id, 
-            "email": user.email, 
+            "id": user.id,
+            "email": user.email,
             "user_metadata": user.user_metadata,
             # Add other necessary fields if needed by downstream
         }
@@ -95,7 +95,7 @@ async def register(user: UserRegister):
     try:
         # Assuming backend.client.supabase is initialized with appropriate key (anon)
         response = supabase.auth.sign_up({"email": email, "password": password})
-        
+
         if response.user and response.user.id:
              return {"id": str(response.user.id), "email": response.user.email}
         else:
@@ -112,7 +112,8 @@ async def register(user: UserRegister):
         if "already been registered" in err_str:
             raise HTTPException(status_code=409, detail="A user with this email address has already been registered") from e
         logging.exception("Supabase admin user creation failed")
-        raise HTTPException(status_code=502, detail=f"Upstream error: {err_str}") from e
+        # Prevents Supabase error detail from leaking to client
+        raise HTTPException(status_code=502, detail="Registration failed") from e
 
 @router.post("/login")
 async def login(user: UserLogin):
@@ -125,44 +126,45 @@ async def login(user: UserLogin):
             "password": password
         })
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid credentials: {str(e)}") from e
+        # Prevents Supabase error detail from leaking to client
+        raise HTTPException(status_code=401, detail="Invalid credentials") from e
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
     response=JSONResponse({"message": "Login successful"})
     access_token = auth_response.session.access_token
     refresh_token = auth_response.session.refresh_token
-    
+
     secure_flag = ENV == "production"
     # SameSite must be None for cross-site cookie access (like OAuth), but None requires Secure.
     samesite_val = "none" if secure_flag else "lax"
-    
+
     # Set HttpOnly cookies
     response.set_cookie(
-        key="sb-access-token", 
-        value=access_token, 
-        httponly=True, 
-        secure=secure_flag, 
-        samesite=samesite_val, 
+        key="sb-access-token",
+        value=access_token,
+        httponly=True,
+        secure=secure_flag,
+        samesite=samesite_val,
         max_age=3600, # 1 hour
         path="/"
     )
     if refresh_token:
         response.set_cookie(
-            key="sb-refresh-token", 
-            value=refresh_token, 
-            httponly=True, 
-            secure=secure_flag, 
-            samesite=samesite_val, 
+            key="sb-refresh-token",
+            value=refresh_token,
+            httponly=True,
+            secure=secure_flag,
+            samesite=samesite_val,
             max_age=604800, # 7 days
             path="/"
         )
-        
+
     if not auth_response.user:
         raise HTTPException(status_code=500, detail="No user returned")
-        
+
     return response
-    
+
 @router.post("/refresh")
 async def refresh(request: Request):
     refresh_token = request.cookies.get("sb-refresh-token")
@@ -178,7 +180,7 @@ async def refresh(request: Request):
 
     if not auth_response.session:
         raise HTTPException(status_code=500, detail="No session returned")
-        
+
     response = JSONResponse({"message": "Refresh successful"})
     access_token = auth_response.session.access_token
     new_refresh_token = auth_response.session.refresh_token
@@ -206,7 +208,7 @@ async def refresh(request: Request):
             path="/"
             )
     return response
-    
+
 @router.get("/me")
 async def me(user: Dict[str, Any] = Depends(get_current_user)):
     return {
@@ -229,13 +231,13 @@ async def logout(user: Dict[str, Any] = Depends(get_current_user)):
         "sb-refresh-token", path="/",
         httponly=True, secure=secure_flag, samesite=samesite_val
     )
-    
+
     # Sign out from Supabase to invalidate the session server-side
     try:
-        supabase.auth.sign_out() 
+        supabase.auth.sign_out()
     except Exception as e:
         logging.debug(f"Supabase sign_out failed (non-critical): {e}")
-        
+
     return response
 
 @router.post("/google_oauth")
