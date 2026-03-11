@@ -54,7 +54,7 @@ async def get_video_details(video_ids):
 
 async def insert_video(video, subject="Science", difficulty="Easy", db_session=None):
     """Insert a video into the database. Uses provided AsyncSession or creates new one."""
-    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert
 
     from backend.database import AsyncSessionLocal
     own_session = db_session is None
@@ -68,13 +68,9 @@ async def insert_video(video, subject="Science", difficulty="Easy", db_session=N
         except Exception:
             duration_seconds = 0
 
-        result = await session.execute(select(Video).filter(Video.youtube_id == video['id']))
-        if result.scalars().first():
-            if own_session:
-                await session.close()
-            return False
-
-        video_record = Video(
+        # Optimization: Use INSERT ... ON CONFLICT DO NOTHING to eliminate redundant SELECT
+        # This saves a DB round-trip on every video processed.
+        stmt = insert(Video).values(
             youtube_id=video['id'],
             title=title,
             description=description,
@@ -85,11 +81,13 @@ async def insert_video(video, subject="Science", difficulty="Easy", db_session=N
             view_count=int(video['statistics'].get('viewCount', 0)),
             like_count=int(video['statistics'].get('likeCount', 0)),
             embedding=None
-        )
-        session.add(video_record)
+        ).on_conflict_do_nothing(index_elements=['youtube_id'])
+
+        result = await session.execute(stmt)
         if own_session:
             await session.commit()
-        return True
+
+        return result.rowcount > 0
     except Exception:
         if own_session:
             await session.rollback()
@@ -105,10 +103,10 @@ def is_youtube_short(video):
         duration_seconds = int(isodate.parse_duration(video['contentDetails']['duration']).total_seconds())
     except Exception:
         return True  # Assume short if can't parse duration
-    
+
     title = video['snippet'].get('title', '').lower()
     description = video['snippet'].get('description', '').lower()
-    
+
     return duration_seconds < 60 or '#shorts' in title or '#shorts' in description
 
 
@@ -122,33 +120,32 @@ async def fetch_and_store_videos(query, max_results=20, video_duration="any", db
     """
     Fetch videos from YouTube API, filter out Shorts and non-educational,
     then store valid videos in the database.
-    
+
     Returns the count of newly inserted videos.
     """
     print(f"🔍 Fetching videos from YouTube for: '{query}'")
-    
+
     yt_results = await fetch_videos(query, max_results=max_results, video_duration=video_duration)
     video_ids = [item["id"]["videoId"] for item in yt_results if "videoId" in item.get("id", {})]
-    
+
     if not video_ids:
         print("⚠️ No video IDs returned from YouTube API.")
         return 0
-    
+
     video_details = await get_video_details(video_ids)
     inserted_count = 0
-    
+
     for video in video_details:
         if is_youtube_short(video):
             print(f"⏭️ Skipped Short: {video['snippet']['title'][:50]}")
             continue
-        
+
         if not is_educational_video(video):
             print(f"⏭️ Skipped non-educational: {video['snippet']['title'][:50]}")
             continue
-        
+
         if await insert_video(video, subject="Auto", difficulty="Medium", db_session=db_session):
             inserted_count += 1
-    
+
     print(f"✅ Inserted {inserted_count} educational videos into database.")
     return inserted_count
-
