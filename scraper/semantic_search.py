@@ -62,7 +62,7 @@ async def create_query_embedding(query):
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
         logging.warning("Cloudflare credentials not set. Vector search disabled.")
         return None
-    
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
@@ -70,13 +70,13 @@ async def create_query_embedding(query):
                 headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
                 json={"text": query},
             )
-        
+
         if response.status_code != 200:
             logging.error(f"Cloudflare API error: {response.status_code} - {response.text}")
             return None
-        
+
         result = response.json()
-        
+
         # Extract embedding from response
         if result.get("success") and result.get("result", {}).get("data"):
             embedding = result["result"]["data"][0]
@@ -86,7 +86,7 @@ async def create_query_embedding(query):
         else:
             logging.error(f"Unexpected Cloudflare response: {result}")
             return None
-        
+
     except Exception as e:
         logging.error(f"Failed to create query embedding: {e}")
         return None
@@ -167,13 +167,13 @@ def _escape_like(query):
     return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-async def _execute_text_search(session, query, duration_filter_sql, limit):
+async def _execute_text_search(session, query, min_duration, max_duration, limit):
     """Run a full-text search using the GIN tsvector index (report §3.1).
 
     Uses websearch_to_tsquery which handles multi-word phrases and quoted
     strings without needing manual query escaping.
     """
-    sql = f"""
+    sql = """
     SELECT
         youtube_id,
         title,
@@ -186,13 +186,19 @@ async def _execute_text_search(session, query, duration_filter_sql, limit):
     FROM videos
     WHERE to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
           @@ websearch_to_tsquery('english', :query)
-    {duration_filter_sql}
+    AND (:min_duration::int IS NULL OR duration >= :min_duration)
+    AND (:max_duration::int IS NULL OR duration < :max_duration)
     ORDER BY view_count DESC NULLS LAST, like_count DESC NULLS LAST
     LIMIT :limit
     """
     return await session.execute(
         text(sql),
-        {"query": query, "limit": limit}
+        {
+            "query": query,
+            "limit": limit,
+            "min_duration": min_duration,
+            "max_duration": max_duration
+        }
     )
 
 
@@ -204,13 +210,13 @@ def _process_text_rows(rows, seen_ids, videos, base_score=None):
             continue
         view_count = view_count or 0
         like_count = like_count or 0
-        
+
         # If no base_score provided, use the old popularity-only logic
         if base_score is not None:
             score = base_score
         else:
             score = float(view_count + 2 * like_count) / 100000
-            
+
         videos.append({
             "video_id": youtube_id,
             "title": title,
@@ -235,18 +241,20 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
     try:
         print(f"Searching for: '{query}' (duration: {video_duration})")
         start_time = time.time()
-        
+
         # === STEP 1: Build duration filter + generate query embedding ===
         from scraper.youtube_scraper import fetch_and_store_videos
 
-        # Build duration filter
-        duration_filter_sql = ""
+        # Build duration filter bounds
+        min_duration = None
+        max_duration = None
         if video_duration == "short":
-            duration_filter_sql = "AND duration < 240"  # < 4 minutes
+            max_duration = 240  # < 4 minutes
         elif video_duration == "medium":
-            duration_filter_sql = "AND duration >= 240 AND duration < 1200"  # 4-20 minutes
+            min_duration = 240
+            max_duration = 1200  # 4-20 minutes
         elif video_duration == "long":
-            duration_filter_sql = "AND duration >= 1200"  # >= 20 minutes
+            min_duration = 1200  # >= 20 minutes
 
         # Cached after first request — no DB round-trip on subsequent calls (report §3.3)
         has_any_embeddings = await _check_has_embeddings(session)
@@ -264,22 +272,29 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
         _initial_text_rows = None  # cached FTS rows for reuse in Step 4 (no-embedding path only)
         if query_vector is not None:
             # SELECT 1 ... LIMIT top_n stops at top_n rows — far cheaper than COUNT(*)
-            supply_sql = f"""
+            # Security Note: Prevents string interpolation vulnerability inside text()
+            supply_sql = """
                 SELECT 1 FROM videos
                 WHERE embedding IS NOT NULL
                 AND 1 - (embedding <=> :qe) > 0.6
-                {duration_filter_sql}
+                AND (:min_duration::int IS NULL OR duration >= :min_duration)
+                AND (:max_duration::int IS NULL OR duration < :max_duration)
                 LIMIT :limit
             """
             supply_rows = (await session.execute(
-                text(supply_sql), {"qe": str(embedding_list), "limit": top_n}
+                text(supply_sql), {
+                    "qe": str(embedding_list),
+                    "limit": top_n,
+                    "min_duration": min_duration,
+                    "max_duration": max_duration
+                }
             )).fetchall()
             print(f"📊 Found {len(supply_rows)} semantically relevant videos in DB (similarity > 0.6)")
             needs_youtube = len(supply_rows) < top_n
         else:
             # Run FTS once and cache rows — reused in Step 4 fallback if no YouTube fetch needed
             _initial_text_rows = (await _execute_text_search(
-                session, query, duration_filter_sql, top_n
+                session, query, min_duration, max_duration, top_n
             )).fetchall()
             print(f"📊 Found {len(_initial_text_rows)} keyword-matching videos in DB (duration: {video_duration})")
             needs_youtube = len(_initial_text_rows) < top_n
@@ -302,7 +317,7 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
                 print(f"⚠️ YouTube fetch failed: {yt_error}")
 
         # === STEP 4: Search and recommend from database ===
-        
+
         videos = []
         seen_ids = set()
 
@@ -310,13 +325,14 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
         # because the newly inserted videos don't have embeddings yet.
         if needs_youtube:
             print("🚀 Fresh Fetch Priority: Retrieving keyword-matched videos first...")
-            text_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
+            text_result = await _execute_text_search(session, query, min_duration, max_duration, top_n)
             _process_text_rows(text_result, seen_ids, videos, base_score=0.7)
 
         # Then, if we still need more videos, perform Vector Search (pgvector)
         if query_vector is not None and len(videos) < top_n:
             print(f"Using Vector Search (pgvector) for remaining {top_n - len(videos)} slots")
-            sql = f"""
+            # Security Note: Prevents string interpolation vulnerability inside text()
+            sql = """
             SELECT
                 youtube_id,
                 title,
@@ -329,16 +345,19 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
             FROM videos
             WHERE embedding IS NOT NULL
             AND 1 - (embedding <=> :query_embedding) > 0.5
-            {duration_filter_sql}
+            AND (:min_duration::int IS NULL OR duration >= :min_duration)
+            AND (:max_duration::int IS NULL OR duration < :max_duration)
             ORDER BY embedding <=> :query_embedding ASC
             LIMIT :limit
             """
-            
+
             result = await session.execute(
                 text(sql),
                 {
                     "query_embedding": str(embedding_list),
-                    "limit": top_n - len(videos)
+                    "limit": top_n - len(videos),
+                    "min_duration": min_duration,
+                    "max_duration": max_duration
                 }
             )
 
@@ -372,7 +391,7 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
                     print("Using Text Search (Initial Fallback - no embeddings DB-wide)")
                 else:
                     print(f"⚠️ Search still under-quota ({len(videos)}/{top_n}). Filling with text hunt...")
-                fallback_result = await _execute_text_search(session, query, duration_filter_sql, top_n)
+                fallback_result = await _execute_text_search(session, query, min_duration, max_duration, top_n)
                 _process_text_rows(fallback_result, seen_ids, videos, base_score=text_base)
 
         # Blend quality signals into vector search scores:
@@ -391,9 +410,9 @@ async def recommend(query, top_n=5, user_id="guest", video_duration="any", db_se
 
         elapsed_time = time.time() - start_time
         print(f"Search completed in {elapsed_time:.2f} seconds")
-        
+
         return sorted(videos, key=lambda v: v["score"], reverse=True)[:top_n]
-        
+
     except Exception as e:
         print(f"[ERROR] Recommend failed: {e}")
         if own_session:
