@@ -1,3 +1,4 @@
+import re
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -12,6 +13,13 @@ class InteractionRequest(BaseModel):
     video_id: str  # YouTube video ID from frontend
     interaction_type: Literal["click", "watch", "like", "rating"]
     rating: Optional[int] = None
+
+    @field_validator("video_id")
+    @classmethod
+    def validate_youtube_id(cls, v):
+        if not re.match(r'^[A-Za-z0-9_-]{11}$', v):
+            raise ValueError("Invalid YouTube video ID format")
+        return v
 
     @field_validator("rating")
     @classmethod

@@ -46,7 +46,7 @@ class TestInteractionEndpoint:
         """POST /api/interactions without auth should return 401."""
         response = client.post(
             "/api/interactions",
-            json={"video_id": "abc123", "interaction_type": "click"},
+            json={"video_id": "abc12345678", "interaction_type": "click"},
         )
         assert response.status_code == 401
 
@@ -58,7 +58,7 @@ class TestInteractionEndpoint:
         try:
             response = client.post(
                 "/api/interactions",
-                json={"video_id": "abc123", "interaction_type": "click"},
+                json={"video_id": "abc12345678", "interaction_type": "click"},
                 headers={"Authorization": "Bearer fake-token"},
             )
         finally:
@@ -79,7 +79,7 @@ class TestInteractionEndpoint:
         try:
             response = client.post(
                 "/api/interactions",
-                json={"video_id": "abc123", "interaction_type": "watch"},
+                json={"video_id": "abc12345678", "interaction_type": "watch"},
                 headers={"Authorization": "Bearer fake-token"},
             )
         finally:
@@ -96,7 +96,7 @@ class TestInteractionEndpoint:
         try:
             response = client.post(
                 "/api/interactions",
-                json={"video_id": "abc123", "interaction_type": "rating", "rating": 4},
+                json={"video_id": "abc12345678", "interaction_type": "rating", "rating": 4},
                 headers={"Authorization": "Bearer fake-token"},
             )
         finally:
@@ -109,7 +109,7 @@ class TestInteractionEndpoint:
         """Rating interaction without a rating value should be 422."""
         response = client.post(
             "/api/interactions",
-            json={"video_id": "abc123", "interaction_type": "rating"},
+            json={"video_id": "abc12345678", "interaction_type": "rating"},
             headers={"Authorization": "Bearer fake-token"},
         )
         assert response.status_code == 422
@@ -118,14 +118,14 @@ class TestInteractionEndpoint:
         """Rating outside 1-5 should be rejected."""
         response = client.post(
             "/api/interactions",
-            json={"video_id": "abc123", "interaction_type": "rating", "rating": 0},
+            json={"video_id": "abc12345678", "interaction_type": "rating", "rating": 0},
             headers={"Authorization": "Bearer fake-token"},
         )
         assert response.status_code == 422
 
         response = client.post(
             "/api/interactions",
-            json={"video_id": "abc123", "interaction_type": "rating", "rating": 6},
+            json={"video_id": "abc12345678", "interaction_type": "rating", "rating": 6},
             headers={"Authorization": "Bearer fake-token"},
         )
         assert response.status_code == 422
@@ -134,7 +134,7 @@ class TestInteractionEndpoint:
         """Unknown interaction type should be 422."""
         response = client.post(
             "/api/interactions",
-            json={"video_id": "abc123", "interaction_type": "bookmark"},
+            json={"video_id": "abc12345678", "interaction_type": "bookmark"},
             headers={"Authorization": "Bearer fake-token"},
         )
         assert response.status_code == 422
@@ -146,7 +146,7 @@ class TestInteractionEndpoint:
         try:
             response = client.post(
                 "/api/interactions",
-                json={"video_id": "nonexistent-id", "interaction_type": "click"},
+                json={"video_id": "nonexistent", "interaction_type": "click"},
                 headers={"Authorization": "Bearer fake-token"},
             )
         finally:
@@ -154,3 +154,12 @@ class TestInteractionEndpoint:
 
         assert response.status_code == 404
         assert "not found" in response.json()["error"]
+
+    def test_invalid_video_id_format_rejected(self, client, auth_override):
+        """Invalid YouTube ID format should be 422."""
+        response = client.post(
+            "/api/interactions",
+            json={"video_id": "abc123", "interaction_type": "click"},
+            headers={"Authorization": "Bearer fake-token"},
+        )
+        assert response.status_code == 422
