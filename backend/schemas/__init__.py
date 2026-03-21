@@ -8,10 +8,20 @@ class RecommendationRequest(BaseModel):
     duration: Optional[str] = "medium"
 
 
+import re
+
+
 class InteractionRequest(BaseModel):
     video_id: str  # YouTube video ID from frontend
     interaction_type: Literal["click", "watch", "like", "rating"]
     rating: Optional[int] = None
+
+    @field_validator("video_id")
+    @classmethod
+    def validate_video_id(cls, v):
+        if not re.match(r'^[A-Za-z0-9_-]{11}$', v):
+            raise ValueError("Invalid YouTube video ID format")
+        return v
 
     @field_validator("rating")
     @classmethod
