@@ -1,0 +1,4 @@
+## 2024-03-21 - [Performance] Use `INSERT ... ON CONFLICT DO NOTHING` in Youtube Scraper
+**Vulnerability/Bottleneck:** Pre-insert SELECT round-trip in `scraper/youtube_scraper.py` on `insert_video` function causes performance degradation. The function does a full lookup by youtube_id and then does an insert, running two queries instead of one.
+**Learning:** For batch operations where many items may already exist in the database (e.g. repeated fetching of YouTube query results), it is more efficient to use PostgreSQL's native `INSERT ... ON CONFLICT DO NOTHING`.
+**Prevention:** Instead of using ORM `SELECT` then `INSERT` manually, always use the database-level conflict resolution features `sqlalchemy.dialects.postgresql.insert(Table).values(...).on_conflict_do_nothing()` for high-throughput unique constraint updates.
